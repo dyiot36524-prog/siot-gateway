@@ -1,0 +1,21 @@
+# ── 비밀/민감 (절대 커밋 금지) ──────────────
+# siot-app/.env.local 은 siot-app/.gitignore가 이미 제외하지만, 안전망으로 한 번 더.
+**/.env.local
+**/.env*.local
+**/.siot-data/
+
+# ── 로컬 도구/상태 (저장소에 불필요) ─────────
+.omc/
+.claude/
+
+# ── 복사용 임시 폴더 (siot-app과 중복) ───────
+addon-package/
+
+# ── 내부 전략 문서 (공개 저장소엔 미포함; 필요하면 이 두 줄 지우세요) ──
+시옷앱_개발가이드_Nextjs.md
+시옷앱_연동_API명세서_v0.1.md
+
+# ── 빌드 산출물 (siot-app/.gitignore에도 있음) ──
+**/node_modules/
+**/.next/
+*.log

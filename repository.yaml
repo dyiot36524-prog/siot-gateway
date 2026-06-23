@@ -1,0 +1,7 @@
+# HA 애드온 저장소 매니페스트.
+# GitHub 저장소 루트에 이 파일이 있으면 HA가 해당 저장소를 "애드온 저장소"로 인식한다.
+# HA에서 설정 → 애드온 → 애드온 스토어 → ⋮ → 저장소 → 아래 URL 입력 후 추가.
+#
+name: 시옷앱 게이트웨이 저장소
+url: https://github.com/dyiot36524-prog/siot-gateway
+maintainer: 광수 <dyiot36524@gmail.com>

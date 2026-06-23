@@ -1,0 +1,6 @@
+# 줄바꿈 정규화 — 셸 스크립트/Dockerfile은 항상 LF (리눅스 컨테이너에서 깨지지 않도록).
+*.sh text eol=lf
+run.sh text eol=lf
+Dockerfile text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf

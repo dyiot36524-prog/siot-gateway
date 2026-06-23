@@ -1,0 +1,20 @@
+# HA builder(하스빌더) 전용 베이스 이미지 설정.
+# HA builder가 아치별 이미지를 빌드할 때 이 파일을 참조한다.
+#
+# ⚠️ 중요: 이 build_from 방식을 실제로 쓰려면 Dockerfile이
+#   ARG BUILD_FROM
+#   FROM ${BUILD_FROM}
+# 패턴으로 작성되어야 한다.
+# 현재 Dockerfile은 node:20-bookworm-slim 베이스를 고정으로 사용하므로
+# 이 파일의 build_from 값은 무시된다.
+# → BUILD_FROM 패턴으로 전환하려면 siot-app/Dockerfile.addon 을 별도 작성해야 한다(FLEET.md 참고).
+#
+# 단순 경로(현재 권장):
+#   현재 Dockerfile(node 베이스 고정)을 그대로 두고 GitHub Actions에서
+#   docker/build-push-action 으로 멀티아치 빌드하면 BUILD_FROM 없이도 동작한다.
+#   자세한 내용은 FLEET.md > OTA 및 ../.github/workflows/build.yml 참고.
+
+build_from:
+  aarch64: ghcr.io/home-assistant/aarch64-base:3.19
+  armv7: ghcr.io/home-assistant/armv7-base:3.19
+  amd64: ghcr.io/home-assistant/amd64-base:3.19

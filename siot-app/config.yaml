@@ -1,0 +1,27 @@
+# Home Assistant 애드온 매니페스트.
+# 이 폴더(siot-app) 전체를 HA OS의 /addons/siot-app/ 에 두면 "로컬 애드온"으로 설치된다.
+name: 시옷앱 게이트웨이
+version: "0.1.0"
+slug: siot_app
+description: 시옷 게이트웨이 — HA 엔진 위의 페어링·제어 UI와 시옷플랫폼 연동 API
+# 지원 아키텍처 (라즈베리파이4/5=aarch64, 구형=armv7, 개발용=amd64).
+arch:
+  - aarch64
+  - armv7
+  - amd64
+# HA 코어가 올라온 뒤 시작.
+startup: application
+boot: auto
+# 자체 CMD(run.sh)를 PID1으로 — s6 init 미사용.
+init: false
+# http://supervisor/core 프록시로 HA API 접근 권한 부여 (SUPERVISOR_TOKEN 자동 주입).
+homeassistant_api: true
+# 웹 UI/API를 호스트 포트로 노출. http://<HA주소>:3000 으로 접속.
+# (Ingress는 동적 하위경로라 현재 앱 구조에 부적합 — 후속 과제. 지금은 포트 직접 노출.)
+ports:
+  3000/tcp: 3000
+ports_description:
+  3000/tcp: 시옷앱 웹/UI (페어링·제어·연결 화면)
+# /data 영속 볼륨은 애드온에 자동 제공됨 → SIOT_DATA_DIR=/data (gatewayId·토큰 보존).
+options: {}
+schema: {}

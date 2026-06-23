@@ -1,0 +1,11 @@
+# 이미지 빌드 컨텍스트에서 제외 (용량·보안).
+node_modules
+.next
+.siot-data
+.git
+dev.log
+npm-debug.log*
+# 비밀 유출 방지: 로컬 개발 env는 절대 이미지에 넣지 않는다.
+# 운영 값은 run.sh + HA Supervisor(SUPERVISOR_TOKEN)에서 주입.
+.env.local
+.env*.local
