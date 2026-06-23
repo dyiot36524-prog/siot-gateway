@@ -1,7 +1,7 @@
 # Home Assistant 애드온 매니페스트.
 # 이 폴더(siot-app) 전체를 HA OS의 /addons/siot-app/ 에 두면 "로컬 애드온"으로 설치된다.
 name: 시옷앱 게이트웨이
-version: "0.1.1"
+version: "0.1.2"
 slug: siot_app
 description: 시옷 게이트웨이 — HA 엔진 위의 페어링·제어 UI와 시옷플랫폼 연동 API
 # 지원 아키텍처 (라즈베리파이4/5=aarch64, 구형=armv7, 개발용=amd64).
@@ -23,5 +23,10 @@ ports:
 ports_description:
   3000/tcp: 시옷앱 웹/UI (페어링·제어·연결 화면)
 # /data 영속 볼륨은 애드온에 자동 제공됨 → SIOT_DATA_DIR=/data (gatewayId·토큰 보존).
+# mDNS 멀티캐스트가 LAN에 도달하려면 호스트 네트워크 필요.
+# host_network: true 이면 컨테이너가 호스트 네트워크 스택을 공유해 멀티캐스트가 외부로 전파된다.
+# 앱은 host:3000 으로 직접 노출됨 (아래 ports 매핑은 host_network 모드에서 무시되지만
+# 문서 목적으로 남겨 둠 — HA 애드온 UI의 포트 설명에 계속 표시된다).
+host_network: true
 options: {}
 schema: {}

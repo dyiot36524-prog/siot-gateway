@@ -2,6 +2,8 @@
 
 // 게이트웨이 연결 코드 생성 및 게이트웨이 정보 표시 컴포넌트
 import { useState, useEffect } from "react";
+// QR 코드 SVG 렌더링 라이브러리 (qrcode.react v4)
+import { QRCodeSVG } from "qrcode.react";
 
 // GET /api/gateway 응답 형태
 interface GatewayInfo {
@@ -121,6 +123,21 @@ export function GatewayConnect() {
                 </p>
                 <p className="break-all font-mono text-sm text-black dark:text-white">
                   {gatewayInfo.gatewayId}
+                </p>
+              </div>
+
+              {/* QR 코드 — gatewayId가 로드된 경우에만 표시 */}
+              <div className="flex flex-col items-center gap-2 pt-1">
+                {/* 스캔 가독성을 위해 다크모드에서도 흰 배경 유지 */}
+                <div className="bg-white p-3 rounded-xl">
+                  <QRCodeSVG
+                    value={gatewayInfo.gatewayId}
+                    size={160}
+                    marginSize={2}
+                  />
+                </div>
+                <p className="text-xs text-center text-black/40 dark:text-white/30">
+                  이 QR을 시옷플랫폼 앱으로 스캔해 게이트웨이를 연동하세요.
                 </p>
               </div>
 
