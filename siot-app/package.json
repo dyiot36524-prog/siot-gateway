@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "compute-id": "node scripts/compute-gateway-id.mjs"
+    "compute-id": "node scripts/compute-gateway-id.mjs",
+    "discover": "node scripts/discover-siot.mjs"
   },
   "dependencies": {
     "bonjour-service": "^1.4.1",
