@@ -126,6 +126,31 @@ export function GatewayConnect() {
                 </p>
               </div>
 
+              {/* 이 게이트웨이의 mDNS .local 주소 */}
+              {(() => {
+                // shortId: "gw_" 뒤 8자 (slice(3,11))
+                const shortId = gatewayInfo.gatewayId.slice(3, 11);
+                const localUrl = `http://siot-${shortId}.local:3000`;
+                return (
+                  <div className="flex flex-col gap-1">
+                    <p className="text-xs font-medium uppercase tracking-wider text-black/40 dark:text-white/30">
+                      이 게이트웨이 주소
+                    </p>
+                    <a
+                      href={localUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="break-all font-mono text-sm text-emerald-600 underline underline-offset-2 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+                    >
+                      {localUrl}
+                    </a>
+                    <p className="text-xs text-black/40 dark:text-white/30">
+                      같은 와이파이의 폰·PC 브라우저에서 이 주소로 IP 없이 접속할 수 있어요. (윈도우는 Bonjour 필요)
+                    </p>
+                  </div>
+                );
+              })()}
+
               {/* QR 코드 — gatewayId가 로드된 경우에만 표시 */}
               <div className="flex flex-col items-center gap-2 pt-1">
                 {/* 스캔 가독성을 위해 다크모드에서도 흰 배경 유지 */}

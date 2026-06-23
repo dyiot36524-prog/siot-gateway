@@ -62,7 +62,15 @@ if (!serial) {
 //   "gw_" + uuidv5(serial, SIOT_NAMESPACE)
 const id = "gw_" + uuidv5(serial, SIOT_NAMESPACE);
 
+// mDNS 호스트명·URL 계산
+// shortId = "gw_" 뒤 8자(slice(3,11)) → 게이트웨이 bonjour-service와 동일한 규칙
+const shortId = id.slice(3, 11);
+const hostname = `siot-${shortId}.local`;
+const url = `http://${hostname}:3000`;
+
 // 결과 출력
 console.log(`gatewayId : ${id}`);
 console.log(`serial    : ${serial}`);
-console.log("→ 이 gatewayId를 QR로 인쇄하면, 그 Pi가 첫 부팅 시 같은 ID를 자동 생성합니다.");
+console.log(`hostname  : ${hostname}`);
+console.log(`url       : ${url}`);
+console.log("→ 이 url을 QR로 라벨에 인쇄하면, 스캔 시 브라우저가 바로 이 게이트웨이를 엽니다(화면·IP·앱 불필요).");

@@ -29,17 +29,25 @@ export async function startMdnsAdvertisement(): Promise<void> {
 
     const port = Number(process.env.PORT ?? 3000);
 
-    // _siot._tcp 로 LAN에 광고. txt 레코드에 id·app을 실어 발견 즉시 식별 가능하게 한다.
+    // gatewayId "gw_" 뒤 8자로 고유 호스트명을 만든다. host 옵션을 주면 bonjour가
+    // 이 이름의 A 레코드를 광고 → 브라우저가 http://siot-<shortId>.local:3000 으로
+    // IP 없이 바로 접속할 수 있다(service.js의 RecordA가 host를 이름으로 사용).
+    const shortId = gatewayId.slice(3, 11);
+    const hostname = `siot-${shortId}.local`;
+    const url = `http://${hostname}:${port}`;
+
+    // _siot._tcp 서비스(앱 발견용) + 고유 .local 호스트명(브라우저 직행용)을 함께 광고.
     new Bonjour().publish({
-      name: `siot-${gatewayId.slice(3, 11)}`,
+      name: `siot-${shortId}`,
       type: "siot",
       port,
-      txt: { id: gatewayId, app: "siot-gateway" },
+      host: hostname,
+      txt: { id: gatewayId, app: "siot-gateway", url },
     });
 
     started = true;
     console.log(
-      `[mdns] mDNS 광고 시작: _siot._tcp 포트=${port} gatewayId=${gatewayId}`,
+      `[mdns] mDNS 광고 시작: ${hostname}:${port} gatewayId=${gatewayId}`,
     );
   } catch (err) {
     // mDNS 실패는 게이트웨이 운영에 치명적이지 않으므로 로그만 남기고 계속.

@@ -25,8 +25,13 @@
 
 ## 4. 시작 & 접속
 1. 설치 후 **시작**. (부팅 시 자동 시작되도록 "부팅 시 시작" 켜기)
-2. 브라우저에서 **http://homeassistant.local:3000** (또는 `http://<Pi-IP>:3000`) 접속.
+2. 브라우저에서 아래 주소 중 하나로 접속:
+   - `http://homeassistant.local:3000` — HA 기본 mDNS 주소
+   - `http://<Pi-IP>:3000` — IP 직접 입력
+   - `http://siot-<shortId>.local:3000` — 시옷앱 고유 mDNS 주소 (v0.1.3 이상, 같은 와이파이, 폰·맥 기본 지원·윈도우는 Bonjour 필요)
 3. 홈 화면에 HA의 기기들이 뜨면 성공 — HA 연결은 **자동**이다(아래 참고).
+
+> `siot-<shortId>.local`의 `shortId`는 gatewayId(`gw_XXXXXXXX...`)의 `gw_` 뒤 8자다. 기기 겉면 QR 스티커에 전체 URL이 인쇄되어 있으면 스캔만으로 바로 접속할 수 있다.
 
 ## 5. HA 연결이 자동인 이유
 애드온 안에서는 `run.sh`가 HA Supervisor가 주입하는 `SUPERVISOR_TOKEN`을 사용하고,
