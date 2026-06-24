@@ -18,9 +18,9 @@ export const metadata: Metadata = {
   description: "시옷앱: 현장 기기를 페어링·제어하는 게이트웨이",
 };
 
-// 테마 색상을 emerald-500 으로 지정 (PWA/브라우저 UI 색).
+// 테마 색상을 시옷 브랜드 주황(#f5a21c)으로 지정 (PWA/브라우저 UI 색).
 export const viewport = {
-  themeColor: "#10b981",
+  themeColor: "#f5a21c",
 };
 
 export default function RootLayout({

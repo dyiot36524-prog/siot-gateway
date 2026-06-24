@@ -96,7 +96,7 @@ export function PairingFlow() {
       <div className="flex flex-col items-center justify-center gap-4 py-16">
         {/* 스피너 */}
         <div
-          className="h-10 w-10 rounded-full border-4 border-black/10 border-t-emerald-500 dark:border-white/10 dark:border-t-emerald-400 animate-spin"
+          className="h-10 w-10 rounded-full border-4 border-black/10 border-t-siot-500 dark:border-white/10 dark:border-t-siot-400 animate-spin"
           aria-hidden="true"
         />
         <p className="text-base font-medium text-black/60 dark:text-white/50">
@@ -109,11 +109,24 @@ export function PairingFlow() {
   // ── 페어링 완료 화면 ───────────────────────────────────────────
   if (step.kind === "paired") {
     return (
-      <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-6 flex flex-col gap-4">
+      <div className="rounded-2xl border border-siot-500/30 bg-siot-500/5 p-6 flex flex-col gap-4">
         <div className="flex items-center gap-3">
-          <span className="text-3xl" aria-hidden="true">✓</span>
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-siot-500 text-white">
+            <svg
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m5 13 4 4L19 7" />
+            </svg>
+          </span>
           <div>
-            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+            <p className="text-lg font-bold text-siot-600 dark:text-siot-400">
               페어링 완료
             </p>
             <p className="text-sm text-black/60 dark:text-white/50 mt-0.5">
@@ -124,7 +137,7 @@ export function PairingFlow() {
         <div className="flex flex-col gap-3 sm:flex-row">
           <Link
             href="/"
-            className="flex min-h-12 w-full items-center justify-center rounded-2xl bg-emerald-500 px-5 py-3 text-base font-semibold text-white hover:bg-emerald-600 transition sm:w-auto sm:flex-1"
+            className="flex min-h-12 w-full items-center justify-center rounded-2xl bg-siot-500 px-5 py-3 text-base font-semibold text-white hover:bg-siot-600 transition sm:w-auto sm:flex-1"
           >
             홈에서 확인
           </Link>
@@ -205,13 +218,13 @@ export function PairingFlow() {
               className={`flex min-h-24 w-full flex-col items-start gap-2 rounded-2xl border p-5 text-left transition
                 ${
                   isSelected
-                    ? "border-emerald-500 bg-emerald-500/10 dark:border-emerald-400 dark:bg-emerald-400/10"
+                    ? "border-siot-500 bg-siot-500/10 dark:border-siot-400 dark:bg-siot-400/10"
                     : "border-black/10 bg-white hover:border-black/20 hover:bg-black/[0.02] dark:border-white/10 dark:bg-white/5 dark:hover:border-white/20 dark:hover:bg-white/10"
                 }`}
             >
               <span
                 className={`text-base font-bold ${
-                  isSelected ? "text-emerald-600 dark:text-emerald-400" : ""
+                  isSelected ? "text-siot-600 dark:text-siot-400" : ""
                 }`}
               >
                 {opt.label}
@@ -221,7 +234,7 @@ export function PairingFlow() {
               </span>
               {/* 선택 표시 */}
               {isSelected && (
-                <span className="mt-auto inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                <span className="mt-auto inline-flex items-center gap-1 text-xs font-semibold text-siot-600 dark:text-siot-400">
                   <span aria-hidden="true">●</span> 선택됨
                 </span>
               )}
@@ -235,7 +248,7 @@ export function PairingFlow() {
         type="button"
         disabled={!selected}
         onClick={handleStart}
-        className="flex min-h-14 w-full items-center justify-center rounded-2xl bg-emerald-500 px-5 py-4 text-base font-bold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex min-h-14 w-full items-center justify-center rounded-2xl bg-siot-500 px-5 py-4 text-base font-bold text-white transition hover:bg-siot-600 disabled:cursor-not-allowed disabled:opacity-40"
       >
         페어링 시작
       </button>

@@ -86,7 +86,7 @@ export function DeviceCard({
             className={`w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50
               ${
                 on
-                  ? "bg-emerald-500 text-white hover:bg-emerald-600"
+                  ? "bg-siot-500 text-white hover:bg-siot-600"
                   : "bg-black/5 text-black/70 hover:bg-black/10 dark:bg-white/10 dark:text-white/70 dark:hover:bg-white/20"
               }`}
           >

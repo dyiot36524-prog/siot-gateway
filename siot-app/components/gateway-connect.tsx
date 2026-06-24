@@ -140,7 +140,7 @@ export function GatewayConnect() {
                       href={localUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="break-all font-mono text-sm text-emerald-600 underline underline-offset-2 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+                      className="break-all font-mono text-sm text-siot-600 underline underline-offset-2 hover:text-siot-700 dark:text-siot-400 dark:hover:text-siot-300"
                     >
                       {localUrl}
                     </a>
@@ -171,7 +171,7 @@ export function GatewayConnect() {
                 <span
                   className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                     gatewayInfo.registered
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400"
+                      ? "bg-siot-100 text-siot-700 dark:bg-siot-500/20 dark:text-siot-400"
                       : "bg-black/5 text-black/50 dark:bg-white/10 dark:text-white/40"
                   }`}
                 >
@@ -277,7 +277,7 @@ export function GatewayConnect() {
           type="button"
           onClick={handleGenerate}
           disabled={status === "loading"}
-          className="w-full min-h-12 rounded-xl bg-emerald-500 px-4 py-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full min-h-12 rounded-xl bg-siot-500 px-4 py-4 text-base font-semibold text-white transition hover:bg-siot-600 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {status === "loading" ? "생성 중…" : "연결 코드 생성"}
         </button>

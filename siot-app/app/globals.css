@@ -12,6 +12,16 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* 시옷 브랜드 색 — 로고 다이아몬드 주황(#f5a21c) 기반. (bg-siot-500 등으로 사용) */
+@theme {
+  --color-siot-100: #fdeccf;
+  --color-siot-300: #f9c674;
+  --color-siot-400: #f8b547;
+  --color-siot-500: #f5a21c;
+  --color-siot-600: #db8a0c;
+  --color-siot-700: #a8650a;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
