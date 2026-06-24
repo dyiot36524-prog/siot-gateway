@@ -7,7 +7,7 @@ export default function Home() {
   return (
     <main className="mx-auto w-full max-w-5xl px-5 py-10">
       <h1 className="sr-only">시옷앱 게이트웨이</h1>
-      <header className="mb-8 flex items-center gap-3">
+      <header className="mb-8">
         {/* 테두리 없이 로고만. 다크모드에선 흰 버전 로고로 자동 교체. */}
         <Image
           src="/logo.png"
@@ -15,7 +15,7 @@ export default function Home() {
           width={2240}
           height={828}
           priority
-          className="h-8 w-auto dark:hidden"
+          className="h-12 w-auto dark:hidden"
         />
         <Image
           src="/logo-light.png"
@@ -23,11 +23,8 @@ export default function Home() {
           width={2240}
           height={828}
           priority
-          className="hidden h-8 w-auto dark:block"
+          className="hidden h-12 w-auto dark:block"
         />
-        <p className="text-sm font-medium text-black/50 dark:text-white/40">
-          게이트웨이
-        </p>
       </header>
 
       <section>

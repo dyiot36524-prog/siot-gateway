@@ -90,7 +90,7 @@ export function DeviceCard({
                   : "bg-black/5 text-black/70 hover:bg-black/10 dark:bg-white/10 dark:text-white/70 dark:hover:bg-white/20"
               }`}
           >
-            {busy ? "..." : on ? "켜짐 — 끄기" : "꺼짐 — 켜기"}
+            {busy ? "..." : on ? "켜짐" : "꺼짐"}
           </button>
         ) : (
           <p className="text-2xl font-semibold tabular-nums">
