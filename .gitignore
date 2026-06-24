@@ -22,3 +22,6 @@ siot-app-mobile/
 **/node_modules/
 **/.next/
 *.log
+
+# 시옷 릴레이 서버 (별도 배포 — Fly.io)
+siot-relay/

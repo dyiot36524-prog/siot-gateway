@@ -9,5 +9,9 @@ export async function register() {
     // mDNS 광고 시작: 실패해도 서버를 죽이지 않는다(내부에서 try/catch 처리).
     const { startMdnsAdvertisement } = await import("./lib/mdns");
     await startMdnsAdvertisement();
+
+    // 릴레이 터널 에이전트(원격 접속): SIOT_RELAY_URL 있으면 연결. 실패 격리됨.
+    const { startRelayAgent } = await import("./lib/relay-agent");
+    await startRelayAgent();
   }
 }
