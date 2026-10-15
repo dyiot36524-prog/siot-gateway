@@ -1,0 +1,24 @@
+{
+  "rules": [
+    {
+      "id": "door-open-turns-plug-on",
+      "description": "문이 열리면 플러그 켜기 (MYGGBETT -> GRILLPLATS). deviceId 는 devices 명령 결과로 바꿀 것",
+      "enabled": true,
+      "trigger": { "deviceId": "matter:2", "capability": "contact", "field": "open", "changedTo": true },
+      "conditions": [],
+      "actions": [
+        { "type": "command", "deviceId": "matter:1", "capability": "onoff", "action": "on" },
+        { "type": "mqtt", "topic": "events/door", "payload": { "msg": "door opened" } }
+      ]
+    },
+    {
+      "id": "door-closed-turns-plug-off",
+      "enabled": true,
+      "trigger": { "deviceId": "matter:2", "capability": "contact", "field": "open", "changedTo": false },
+      "actions": [
+        { "type": "delay", "ms": 5000 },
+        { "type": "command", "deviceId": "matter:1", "capability": "onoff", "action": "off" }
+      ]
+    }
+  ]
+}

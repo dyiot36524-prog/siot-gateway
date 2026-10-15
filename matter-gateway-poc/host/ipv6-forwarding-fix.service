@@ -1,0 +1,13 @@
+# /etc/systemd/system/ipv6-forwarding-fix.service
+# Docker 가 기동 시 IPv6 forwarding 을 0 으로 되돌리는 문제 보정
+[Unit]
+Description=Re-apply IPv6 forwarding/RA sysctls after Docker
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/sysctl --system
+
+[Install]
+WantedBy=multi-user.target
