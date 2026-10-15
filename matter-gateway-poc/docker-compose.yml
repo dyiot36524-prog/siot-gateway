@@ -1,24 +1,30 @@
-# Matter/Thread 게이트웨이 PoC (Raspberry Pi 5 + ZBT-2)
-# 사용 전 확인: .env 의 ZBT2_DEV, BACKBONE_IF, GATEWAY_ID
+# 시옷 Matter/Thread 게이트웨이 (Raspberry Pi 5 + ZBT-2)
+# 사용 전: cp .env.example .env 후 ZBT2_DEV, BACKBONE_IF 확인. install.sh 가 자동으로 채운다.
 services:
   otbr:
-    image: openthread/border-router:latest
+    # openthread/border-router 는 s6 기반 이미지로 환경변수(OT_*)로 설정한다. 명령 인자를 주면 안 된다.
+    image: openthread/border-router:v2026.10.0
     container_name: otbr
     restart: unless-stopped
     network_mode: host            # 보더 라우팅/mDNS 때문에 host 필수
-    privileged: true
+    cap_add: [NET_ADMIN]
     devices:
       - ${ZBT2_DEV:-/dev/ttyACM0}:/dev/ttyACM0
+      - /dev/net/tun:/dev/net/tun
     sysctls:
       net.ipv6.conf.all.disable_ipv6: 0
       net.ipv4.conf.all.forwarding: 1
       net.ipv6.conf.all.forwarding: 1
+    environment:
+      OT_RCP_DEVICE: "spinel+hdlc+uart:///dev/ttyACM0?uart-baudrate=460800"   # ZBT-2 OpenThread RCP 펌웨어 기본 보율
+      OT_INFRA_IF: ${BACKBONE_IF:-eth0}
+      OT_THREAD_IF: wpan0
+      OT_LOG_LEVEL: "5"
+      OT_REST_LISTEN_ADDR: 127.0.0.1
+      OT_REST_LISTEN_PORT: "8081"
     volumes:
-      - ./data/otbr:/var/lib/thread
-    command: >
-      --radio-url "spinel+hdlc+uart:///dev/ttyACM0?uart-baudrate=460800"
-      --backbone-interface ${BACKBONE_IF:-eth0}
-    # 웹 GUI: http://<pi>:80  (host 네트워크라 포트 매핑 불필요)
+      - ./data/otbr:/data
+    # 웹 GUI: http://<pi>:80 , REST: http://127.0.0.1:8081 (에이전트가 데이터셋 자동 등록에 사용)
 
   matter:
     image: ghcr.io/matter-js/matterjs-server:stable
@@ -45,56 +51,70 @@ services:
       timeout: 5s
       retries: 5
 
-  mosquitto:
-    # PoC용 로컬 브로커. 실제 플랫폼 브로커(mTLS)로 교체 예정
-    image: eclipse-mosquitto:2
-    container_name: mosquitto
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./data/mosquitto:/mosquitto/data
-
   agent:
     build: ./agent
+    image: siot-matter-agent:local
     container_name: gateway-agent
     restart: unless-stopped
-    network_mode: host
-    depends_on: [matter, mosquitto]
+    network_mode: host                   # mDNS(_siot._tcp) + 포트 3000
+    depends_on: [matter]
     environment:
-      GATEWAY_ID: ${GATEWAY_ID:-gw-poc-001}
+      PORT: "3000"
+      SIOT_GATEWAY_VERSION: ${SIOT_GATEWAY_VERSION:-0.2.0}
+      SIOT_DATA_DIR: /app/data
+      SIOT_RELAY_URL: ${SIOT_RELAY_URL:-}
+      SIOT_SERIAL_FILE: /host/serial-number
+      SIOT_MACHINE_ID_FILE: /host/machine-id
+      MATTER_BACKEND: ${MATTER_BACKEND:-server}
       MATTER_WS_URL: ws://127.0.0.1:5580/ws
-      MQTT_URL: mqtt://127.0.0.1:1883
+      OTBR_REST_URL: http://127.0.0.1:8081
       RULES_FILE: /app/rules.json
-      LOG_LEVEL: info
+      DATA_DIR: /app/data
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: Asia/Seoul
     volumes:
-      - ./agent/rules.example.json:/app/rules.json:ro
       - ./data/agent:/app/data
+      - ./rules.json:/app/rules.json:ro
+      - /sys/firmware/devicetree/base/serial-number:/host/serial-number:ro   # gatewayId 결정적 생성용
+      - /etc/machine-id:/host/machine-id:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
 
-  # ---- 선택지 C: matter.js 직접 임베드 (matter 컨테이너 없이 동작) ----
-  # 실행: docker compose --profile embedded up -d --build agent-embedded   (matter 서비스는 중지할 것)
+  # ---- 선택지 C: matter.js 직접 임베드 (matter 컨테이너 대신) ----
+  # 실행: docker compose stop matter agent && docker compose --profile embedded up -d --build agent-embedded
   agent-embedded:
     build:
       context: ./agent
       dockerfile: Dockerfile.embedded
+    image: siot-matter-agent-embedded:local
     container_name: gateway-agent-embedded
     profiles: [embedded]
     restart: unless-stopped
     network_mode: host
-    privileged: true                 # BLE HCI 소켓(noble) 접근용. 양산 시 cap_add NET_ADMIN/NET_RAW 로 축소
-    depends_on: [otbr, mosquitto]
+    privileged: true                 # BLE HCI 소켓(noble) 접근용
+    depends_on: [otbr]
     environment:
-      GATEWAY_ID: ${GATEWAY_ID:-gw-poc-001}
+      PORT: "3000"
+      SIOT_GATEWAY_VERSION: ${SIOT_GATEWAY_VERSION:-0.2.0}
+      SIOT_DATA_DIR: /app/data
+      SIOT_RELAY_URL: ${SIOT_RELAY_URL:-}
+      SIOT_SERIAL_FILE: /host/serial-number
+      SIOT_MACHINE_ID_FILE: /host/machine-id
       MATTER_BACKEND: embedded
       MATTER_BLE: "1"
       MATTER_BLE_HCI: "0"
       MATTER_INTERFACE: ${BACKBONE_IF:-eth0}
       MATTER_VENDOR_ID: "65521"      # 0xFFF1 테스트 VID
-      MQTT_URL: mqtt://127.0.0.1:1883
+      OTBR_REST_URL: http://127.0.0.1:8081
       RULES_FILE: /app/rules.json
       DATA_DIR: /app/data
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
-      - ./agent/rules.example.json:/app/rules.json:ro
-      - ./data/agent-embedded:/app/data
+      - ./data/agent:/app/data
+      - ./rules.json:/app/rules.json:ro
+      - /sys/firmware/devicetree/base/serial-number:/host/serial-number:ro
+      - /etc/machine-id:/host/machine-id:ro
       - /var/run/dbus:/var/run/dbus:ro

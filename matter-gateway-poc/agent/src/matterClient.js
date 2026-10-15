@@ -25,8 +25,8 @@ export class MatterClient extends EventEmitter {
       log.info(`connecting ${this.url}`);
       const ws = new WebSocket(this.url);
       this.ws = ws;
-      let settled = false;
-      ws.on('open', () => { this.reconnectDelay = 1000; });
+      let settled = false, opened = false;
+      ws.on('open', () => { opened = true; this.reconnectDelay = 1000; });
       ws.on('message', (raw) => {
         let msg;
         try { msg = JSON.parse(raw.toString()); } catch { return; }
@@ -53,7 +53,7 @@ export class MatterClient extends EventEmitter {
         for (const p of this.pending.values()) p.reject(new Error('connection closed'));
         this.pending.clear();
         this.emit('disconnected');
-        if (!this.closed) {
+        if (!this.closed && opened) {           // 한 번이라도 연결된 뒤에만 자동 재접속 (최초 실패는 호출자가 재시도)
           log.warn(`disconnected, reconnecting in ${this.reconnectDelay}ms`);
           setTimeout(() => this.connect().then(() => this.emit('reconnected')).catch(() => {}), this.reconnectDelay);
           this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
