@@ -1,0 +1,15 @@
+# matter.js 직접 임베드 버전. BLE 네이티브 모듈(@stoprocent/noble, bleno) 빌드를 위해 빌드 도구와 bluetooth 헤더 필요.
+FROM node:22-bookworm-slim AS build
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ libbluetooth-dev libudev-dev pkg-config && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
+COPY src ./src
+
+FROM node:22-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends libbluetooth3 libudev1 bluez iputils-ping && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=build /app /app
+RUN mkdir -p /app/data
+ENV MATTER_BACKEND=embedded
+CMD ["node", "src/index.js"]

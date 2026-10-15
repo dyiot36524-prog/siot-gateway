@@ -1,0 +1,100 @@
+# Matter/Thread 게이트웨이 PoC (Raspberry Pi 5 + ZBT-2)
+# 사용 전 확인: .env 의 ZBT2_DEV, BACKBONE_IF, GATEWAY_ID
+services:
+  otbr:
+    image: openthread/border-router:latest
+    container_name: otbr
+    restart: unless-stopped
+    network_mode: host            # 보더 라우팅/mDNS 때문에 host 필수
+    privileged: true
+    devices:
+      - ${ZBT2_DEV:-/dev/ttyACM0}:/dev/ttyACM0
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 0
+      net.ipv4.conf.all.forwarding: 1
+      net.ipv6.conf.all.forwarding: 1
+    volumes:
+      - ./data/otbr:/var/lib/thread
+    command: >
+      --radio-url "spinel+hdlc+uart:///dev/ttyACM0?uart-baudrate=460800"
+      --backbone-interface ${BACKBONE_IF:-eth0}
+    # 웹 GUI: http://<pi>:80  (host 네트워크라 포트 매핑 불필요)
+
+  matter:
+    image: ghcr.io/matter-js/matterjs-server:stable
+    container_name: matterjs-server
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [otbr]
+    environment:
+      LOG_LEVEL: info
+      PRIMARY_INTERFACE: ${BACKBONE_IF:-eth0}
+      LISTEN_ADDRESS: 127.0.0.1          # 에이전트만 접근. 대시보드 보려면 ,${BACKBONE_IF} 추가
+      PRODUCTION_MODE: "true"
+      VENDOR_ID: "0xfff1"                # 테스트 VID. 상용은 CSA 발급 VID 로 교체
+      FABRIC_ID: "1"
+      NOBLE_BINDINGS: dbus               # 호스트 BlueZ 사용 (root 불필요)
+      BLUETOOTH_ADAPTER: "0"
+      TZ: Asia/Seoul
+    volumes:
+      - ./data/matter:/data
+      - /run/dbus:/run/dbus:ro
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:5580/ >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  mosquitto:
+    # PoC용 로컬 브로커. 실제 플랫폼 브로커(mTLS)로 교체 예정
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./data/mosquitto:/mosquitto/data
+
+  agent:
+    build: ./agent
+    container_name: gateway-agent
+    restart: unless-stopped
+    network_mode: host
+    depends_on: [matter, mosquitto]
+    environment:
+      GATEWAY_ID: ${GATEWAY_ID:-gw-poc-001}
+      MATTER_WS_URL: ws://127.0.0.1:5580/ws
+      MQTT_URL: mqtt://127.0.0.1:1883
+      RULES_FILE: /app/rules.json
+      LOG_LEVEL: info
+    volumes:
+      - ./agent/rules.example.json:/app/rules.json:ro
+      - ./data/agent:/app/data
+
+  # ---- 선택지 C: matter.js 직접 임베드 (matter 컨테이너 없이 동작) ----
+  # 실행: docker compose --profile embedded up -d --build agent-embedded   (matter 서비스는 중지할 것)
+  agent-embedded:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile.embedded
+    container_name: gateway-agent-embedded
+    profiles: [embedded]
+    restart: unless-stopped
+    network_mode: host
+    privileged: true                 # BLE HCI 소켓(noble) 접근용. 양산 시 cap_add NET_ADMIN/NET_RAW 로 축소
+    depends_on: [otbr, mosquitto]
+    environment:
+      GATEWAY_ID: ${GATEWAY_ID:-gw-poc-001}
+      MATTER_BACKEND: embedded
+      MATTER_BLE: "1"
+      MATTER_BLE_HCI: "0"
+      MATTER_INTERFACE: ${BACKBONE_IF:-eth0}
+      MATTER_VENDOR_ID: "65521"      # 0xFFF1 테스트 VID
+      MQTT_URL: mqtt://127.0.0.1:1883
+      RULES_FILE: /app/rules.json
+      DATA_DIR: /app/data
+      LOG_LEVEL: info
+    volumes:
+      - ./agent/rules.example.json:/app/rules.json:ro
+      - ./data/agent-embedded:/app/data
+      - /var/run/dbus:/var/run/dbus:ro

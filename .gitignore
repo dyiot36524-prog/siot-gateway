@@ -6,7 +6,8 @@
 
 # ── 로컬 도구/상태 (저장소에 불필요) ─────────
 .omc/
-.claude/
+.claude/*
+!.claude/skills/
 
 # ── 복사용 임시 폴더 (siot-app과 중복) ───────
 addon-package/
