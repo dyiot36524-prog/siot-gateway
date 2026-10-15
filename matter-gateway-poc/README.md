@@ -11,7 +11,7 @@ install.sh              Pi OS Lite 에서 1회 실행하는 설치 스크립트 
 docker-compose.yml      otbr(Thread 보더 라우터) / matterjs-server(Matter 컨트롤러) / agent(시옷 게이트웨이 에이전트)
 host/                   sysctl, systemd 유닛(부팅 자동 기동), ZBT-2 플래시 스크립트
 agent/                  Node.js 에이전트 (플랫폼 API + Matter 엔진 + 로컬 페이지 + 룰 엔진)
-docs/                   설계 평가, 커미셔닝 설명, 중립 모델 명세
+docs/                   설계 평가, 커미셔닝 설명, 중립 모델 명세, openapi.yaml(플랫폼 API), platform-integration.md(앱 연동 가이드)
 ```
 
 ## 구조
