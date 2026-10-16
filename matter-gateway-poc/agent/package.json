@@ -1,10 +1,12 @@
 {
   "name": "gateway-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Matter/Thread 게이트웨이 에이전트 PoC: matterjs-server <-> 중립 디바이스 모델 <-> MQTT/로컬 룰",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node src/index.js",
     "cli": "node src/cli.js",
@@ -15,7 +17,7 @@
     "@matter/nodejs-ble": "0.17.9",
     "@matter/types": "0.17.9",
     "@project-chip/matter.js": "0.17.9",
-    "mqtt": "^5.10.1",
+    "bonjour-service": "^1.4.1",
     "ws": "^8.18.0"
   }
 }

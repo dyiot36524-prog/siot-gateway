@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시옷 Matter 게이트웨이</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#1a1d21; --muted:#6b7280; --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#181b21; --fg:#e8eaed; --muted:#9aa0a6; } }
+  body { margin:0; font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:720px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:8px 0 16px; } h2 { font-size:16px; margin:0 0 8px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 14px; font-size:14px; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  button.danger { background:transparent; color:var(--bad); border:1px solid var(--bad); }
+  input { flex:1; min-width:200px; padding:10px; border-radius:8px; border:1px solid #d1d5db; font-size:14px; background:transparent; color:var(--fg); }
+  .muted { color:var(--muted); font-size:13px; }
+  .code { font-family: ui-monospace, monospace; font-size:28px; letter-spacing:4px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  ul { list-style:none; padding:0; margin:0; } li { padding:10px 0; border-top:1px solid rgba(128,128,128,.2); }
+  li:first-child { border-top:0; }
+  .pill { display:inline-block; font-size:12px; padding:2px 8px; border-radius:999px; background:rgba(37,99,235,.12); color:var(--accent); margin-left:6px; }
+  pre { white-space:pre-wrap; font-size:12px; color:var(--muted); max-height:160px; overflow:auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>시옷 Matter 게이트웨이 <span id="ver" class="muted"></span></h1>
+
+  <section class="card">
+    <h2>게이트웨이</h2>
+    <div class="muted">ID: <span id="gid">-</span></div>
+    <div class="muted">엔진: <span id="engine">-</span> · Thread 데이터셋: <span id="thread">-</span> · BLE: <span id="ble">-</span></div>
+    <div class="muted">플랫폼 등록: <span id="reg">-</span></div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnRegister">등록 코드 발급</button>
+      <span class="muted">시옷플랫폼 앱에서 이 코드를 입력하면 연결됩니다(10분).</span>
+    </div>
+    <div id="codeBox" style="display:none; margin-top:10px"><span class="code" id="code"></span> <span class="muted" id="codeExp"></span></div>
+  </section>
+
+  <section class="card">
+    <h2>기기 페어링 (Matter)</h2>
+    <p class="muted">기기 QR의 문자열(MT:...) 또는 11자리 수동 페어링 코드를 입력하세요. 기기는 게이트웨이와 가까운 곳(BLE 범위)에 두고 페어링 모드로 만듭니다.</p>
+    <div class="row">
+      <input id="pairCode" placeholder="MT:Y.K9042C00KA0648G00 또는 3497-011-2332">
+      <button id="btnPair">페어링 시작</button>
+    </div>
+    <div id="pairStatus" class="muted" style="margin-top:8px"></div>
+    <pre id="pairLog"></pre>
+  </section>
+
+  <section class="card">
+    <h2>기기 <span class="muted" id="count"></span></h2>
+    <ul id="devices"></ul>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

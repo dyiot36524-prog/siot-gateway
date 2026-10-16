@@ -1,0 +1,31 @@
+# matter-gateway-poc 에이전트 테스트 — PR/푸시에서 해당 디렉터리가 바뀔 때만 실행
+name: "Matter 게이트웨이 테스트"
+
+on:
+  pull_request:
+    paths: ["matter-gateway-poc/**", ".github/workflows/matter-gateway-test.yml"]
+  push:
+    branches: [main]
+    paths: ["matter-gateway-poc/**", ".github/workflows/matter-gateway-test.yml"]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: "agent npm test"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: matter-gateway-poc/agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: matter-gateway-poc/agent/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: for f in src/*.js src/*/*.js; do node --check "$f"; done
+      - run: npm test
+      - name: "compose 문법 검사"
+        working-directory: matter-gateway-poc
+        run: cp .env.example .env && docker compose config -q

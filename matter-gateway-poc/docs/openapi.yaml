@@ -1,0 +1,211 @@
+openapi: 3.1.0
+info:
+  title: 시옷 게이트웨이 플랫폼 API
+  version: "1.1"
+  description: |
+    시옷플랫폼/앱 → 게이트웨이 호출 계약. 기존 siot-app(HA 애드온)과 동일한 v1 계약에
+    Matter 페어링 관련 엔드포인트(pairing, commissioning-window, 기기 삭제)가 추가되었다.
+
+    인증: `Authorization: Bearer <gatewayToken>` 또는 `?token=<gatewayToken>` (SSE/EventSource 용).
+    토큰은 `POST /siot-app/api/v1/claim` 으로 1회 발급된다.
+
+    접근 경로: LAN 에서는 mDNS `_siot._tcp` 로 발견한 `http://siot-<shortId>.local:3000`,
+    외부에서는 릴레이 서버가 같은 경로/헤더/본문을 그대로 전달한다.
+servers:
+  - url: http://siot-{shortId}.local:3000
+    variables: { shortId: { default: "xxxxxxxx", description: "gatewayId 의 gw_ 뒤 8자" } }
+tags:
+  - { name: claim, description: 게이트웨이 등록 }
+  - { name: gateway, description: 게이트웨이 정보/상태 }
+  - { name: devices, description: 기기 목록/상태/제어 }
+  - { name: events, description: 실시간 이벤트 (SSE) }
+  - { name: pairing, description: Matter 기기 페어링 (신규) }
+
+paths:
+  /siot-app/api/v1/claim:
+    post:
+      tags: [claim]
+      summary: 등록 코드로 게이트웨이 클레임 (무인증, 1회용)
+      description: 사용자가 게이트웨이 로컬 페이지(또는 앱 화면)에서 발급한 8자리 코드를 입력하면 플랫폼이 호출한다. 성공 시 코드는 즉시 폐기된다.
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [registrationCode], properties: { registrationCode: { type: string, pattern: "^[0-9A-F]{8}$", example: "A3F2B1C9" } } } } }
+      responses:
+        "200": { description: 발급 성공, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, gatewayId: { $ref: "#/components/schemas/GatewayId" }, gatewayToken: { type: string, description: 64 hex, example: "9f1c...e2" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /siot-app/api/v1/gateway:
+    get:
+      tags: [gateway]
+      summary: 게이트웨이 정보
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, gatewayId: { $ref: "#/components/schemas/GatewayId" }, apiVersion: { const: v1 }, version: { type: string, example: "0.2.0" }, engine: { type: object, properties: { kind: { type: string, enum: [matter, home-assistant] }, online: { type: boolean } } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /siot-app/api/v1/system:
+    get:
+      tags: [gateway]
+      summary: 시스템 상태 (플랫폼 폴링용)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/SystemStatus" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /siot-app/api/v1/devices:
+    get:
+      tags: [devices]
+      summary: 기기 목록
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, gatewayId: { $ref: "#/components/schemas/GatewayId" }, count: { type: integer }, devices: { type: array, items: { $ref: "#/components/schemas/SiotDevice" } } } } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /siot-app/api/v1/devices/{id}:
+    parameters: [ { $ref: "#/components/parameters/DeviceId" } ]
+    get:
+      tags: [devices]
+      summary: 기기 1개
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, device: { $ref: "#/components/schemas/SiotDevice" } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [pairing]
+      summary: 기기 제거 (Matter 디커미션) — 신규
+      responses:
+        "200": { description: 제거됨, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, removed: { type: string } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /siot-app/api/v1/devices/{id}/control:
+    parameters: [ { $ref: "#/components/parameters/DeviceId" } ]
+    post:
+      tags: [devices]
+      summary: 기기 제어
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [action], properties: { action: { $ref: "#/components/schemas/Action" } } } } }
+      responses:
+        "200": { description: 명령 전송됨 (상태는 곧 events 로 확정 보고), content: { application/json: { schema: { type: object, properties: { ok: { const: true }, action: { type: string }, service: { type: string, example: matter.onoff.on }, device: { $ref: "#/components/schemas/SiotDevice" } } } } } }
+        "400": { description: 지원하지 않는 action, content: { application/json: { schema: { type: object, properties: { ok: { const: false }, error: { type: string }, supported: { type: array, items: { type: string } } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { description: 기기 통신 실패 }
+
+  /siot-app/api/v1/devices/{id}/commissioning-window:
+    parameters: [ { $ref: "#/components/parameters/DeviceId" } ]
+    post:
+      tags: [pairing]
+      summary: 멀티 어드민 커미셔닝 창 열기 — 신규
+      description: Apple Home 등 다른 생태계가 이 기기를 추가로 등록할 수 있도록 창을 열고 새 코드를 발급한다.
+      requestBody: { content: { application/json: { schema: { type: object, properties: { timeout: { type: integer, default: 300, description: 초 } } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, setup_manual_code: { type: string, example: "34970112332" }, setup_qr_code: { type: string, example: "MT:..." }, timeout: { type: integer } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /siot-app/api/v1/events:
+    get:
+      tags: [events]
+      summary: 실시간 이벤트 스트림 (SSE)
+      description: |
+        `text/event-stream`. 연결 직후 `: connected`, 25초마다 `: ping`.
+        - 기본 메시지(`data:`): `{"type":"device","device":<SiotDevice>}` — 기기 상태 변경
+        - `event: pairing` — `{"sessionId","stage","error","deviceId"}` 페어링 진행
+        - `event: device_removed` — `{"id","deviceId"}`
+        EventSource 는 헤더를 못 보내므로 `?token=` 을 사용한다.
+      parameters: [ { name: token, in: query, schema: { type: string } } ]
+      responses:
+        "200": { description: 스트림, content: { text/event-stream: { schema: { type: string } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /siot-app/api/v1/pairing:
+    get:
+      tags: [pairing]
+      summary: 페어링 상태/최근 세션 — 신규
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, supported: { type: array, items: { type: string }, example: [MATTER] }, active: { type: [string, "null"], description: 진행 중 세션 id }, sessions: { type: array, items: { $ref: "#/components/schemas/PairingSession" } } } } } } }
+    post:
+      tags: [pairing]
+      summary: Matter 기기 페어링 시작 — 신규
+      description: |
+        앱이 기기 QR 을 스캔해 얻은 문자열(`MT:...`) 또는 11/21자리 수동 페어링 코드를 보낸다.
+        게이트웨이가 BLE 로 기기를 찾아 커미셔닝하고 Thread 망에 가입시킨다. 기기는 게이트웨이 BLE 범위(약 10m) 안에 있어야 한다.
+        진행 상황은 `GET /pairing/{sessionId}` 폴링 또는 `events` 의 `pairing` 이벤트로 받는다. 동시에 한 세션만 가능(409).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [code], properties: { code: { type: string, example: "MT:Y.K9042C00KA0648G00" }, protocol: { type: string, enum: [MATTER], default: MATTER } } } } }
+      responses:
+        "202": { description: 세션 시작, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, status: { const: started }, session: { $ref: "#/components/schemas/PairingSession" } } } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: 다른 페어링 진행 중 }
+
+  /siot-app/api/v1/pairing/{sessionId}:
+    get:
+      tags: [pairing]
+      summary: 페어링 세션 조회 — 신규
+      parameters: [ { name: sessionId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, session: { $ref: "#/components/schemas/PairingSession" } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+    tokenQuery: { type: apiKey, in: query, name: token }
+  parameters:
+    DeviceId: { name: id, in: path, required: true, schema: { type: string }, description: "SiotDevice.id (예: matter:12:1)", example: "matter:12:1" }
+  responses:
+    Unauthorized: { description: 토큰 없음/불일치/미등록, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    BadRequest: { description: 잘못된 요청, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    NotFound: { description: 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  schemas:
+    GatewayId: { type: string, pattern: "^gw_[0-9a-f-]{36}$", example: "gw_739f694e-76be-5888-be41-639544c21b5b" }
+    Error: { type: object, properties: { ok: { const: false }, error: { type: string } } }
+    Action:
+      type: string
+      description: 켜기/끄기/토글. 대소문자 무관.
+      enum: [ON, TURN_ON, SWITCH_ON, SWITCH_1_ON, PLUG_ON, OPEN, OFF, TURN_OFF, SWITCH_OFF, SWITCH_1_OFF, PLUG_OFF, CLOSE, TOGGLE]
+    SiotDevice:
+      type: object
+      required: [id, name, deviceType, online, data, lastUpdated]
+      properties:
+        id: { type: string, description: "<source>:<nodeId>:<endpoint>", example: "matter:12:1" }
+        name: { type: string, example: GRILLPLATS }
+        deviceType: { type: string, enum: [PLUG, SWITCH, LIGHT, SENSOR, BINARY_SENSOR, COVER, CLIMATE, FAN, LOCK, WEATHER, UNKNOWN] }
+        online: { type: boolean }
+        data:
+          type: object
+          description: |
+            deviceType 별 정규화 값.
+            PLUG/SWITCH: switch(bool), power(W)?, energy(kWh)?, battery?
+            LIGHT: switch, brightness(0-100)?
+            BINARY_SENSOR: active(bool; 문열림=true), measurement("door"|"motion"), battery(%)?, batteryLow?
+            SENSOR: value, unit, measurement, battery?
+          additionalProperties: { type: [string, number, boolean, "null"] }
+        lastUpdated: { type: string, format: date-time }
+        source: { type: string, example: matter, description: "추가 필드(무시 가능)" }
+        vendor: { type: [string, "null"], example: IKEA of Sweden }
+        model: { type: [string, "null"], example: GRILLPLATS }
+    SystemStatus:
+      type: object
+      properties:
+        ok: { const: true }
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        version: { type: string }
+        registered: { type: boolean }
+        engineOnline: { type: boolean }
+        deviceCount: { type: [integer, "null"] }
+        startedAt: { type: string, format: date-time }
+        engine:
+          type: object
+          description: 추가 필드(Matter 게이트웨이 전용)
+          properties: { kind: { type: string }, backend: { type: string, enum: [server, embedded] }, threadCredentialsSet: { type: boolean }, bluetooth: { type: boolean } }
+    PairingSession:
+      type: object
+      properties:
+        sessionId: { type: string, format: uuid }
+        stage: { type: string, enum: [queued, thread_dataset, commissioning, interviewing, done, failed], description: "commissioning: BLE 탐색·PASE·인증·Thread 가입 / interviewing: 기기 기능 읽기" }
+        startedAt: { type: string, format: date-time }
+        deviceId: { type: [string, "null"], description: 내부 기기 id (matter:<nodeId>) }
+        devices: { type: array, items: { $ref: "#/components/schemas/SiotDevice" }, description: 완료 시 생성된 SiotDevice 들 }
+        error: { type: [string, "null"] }
+        events: { type: array, items: { type: object, properties: { stage: { type: string }, at: { type: integer }, hint: { type: string }, error: { type: string } } } }
+security:
+  - bearer: []
+  - tokenQuery: []
