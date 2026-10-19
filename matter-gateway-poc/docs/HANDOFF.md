@@ -76,10 +76,12 @@ matter-gateway-poc/
   - OTBR: `leader`, `br state running`, 네트워크 `siot-btaylo` 채널 18 PAN 0x4E8B, REST 8081.
   - matterjs-server: 컨트롤러 기동, WS 127.0.0.1:5580, BLE enabled(hci0), 에이전트가 OTBR 데이터셋을 `set_thread_dataset` 로 자동 등록(xp=9ED1A30B9D3178C2).
   - 에이전트: gatewayId `gw_dd10c2c3-cc5c-5a82-ac12-4dd7f0bd424d`, 로컬 페이지 `http://192.168.0.172:3000` (mDNS `siot-dd10c2c3.local`, `_siot._tcp` Mac 에서 발견됨), 토큰 없는 플랫폼 API 401.
-- **systemd 등록 완료**: `sudo ./install.sh` 재실행으로 `matter-gateway.service` enabled/active. 세 컨테이너 모두 healthy. 재부팅 복구(AC-1) 실측은 전원 재투입으로 확인 예정.
+- **systemd 등록 완료**: `sudo ./install.sh` 재실행으로 `matter-gateway.service` enabled/active. 세 컨테이너 모두 healthy.
+- **AC-1 재부팅 복구 통과** (2026-10-19 23:21 전원 재투입): 부팅 후 약 1분 내 3000 포트 healthz 응답, OTBR 이 저장된 데이터셋으로 `leader`/`br running`, matterjs-server 가 저장된 Thread 자격 복원(`Registered Thread credentials from stored`), 에이전트 synced·mDNS 광고, 토큰 없는 API 401. `ipv6-forwarding-fix.service` 는 oneshot 이라 실행 후 inactive 로 보이는 것이 정상(sysctl 값은 적용됨).
+- **합격 기준 현황**: AC-1 통과, mDNS/로컬페이지/401 확인. 미확인: AC-5 이후(실기기 커미셔닝, 이벤트/제어 지연, claim, 24시간).
 
 ## 6. 바로 다음 할 일
-1. 전원 재투입 후 `http://192.168.0.172:3000/healthz` 가 다시 뜨는지(AC-1). Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용).
+1. (완료) AC-1 재부팅 복구. Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용). 소스 수정 후 반영: `rsync` 로 `~/matter-gateway-poc` 갱신 → `sudo ./install.sh` 재실행(멱등) 또는 `/opt/matter-gateway` 에서 `docker compose build agent && docker compose up -d`.
 3. 로컬 페이지에서 MYGGBETT / GRILLPLATS 커미셔닝(AC-5). 실패 시 `docker logs matterjs-server` 의 BLE/PASE 단계 확인 → 임베드 백엔드 전환(README "Matter 백엔드 전환").
 4. 이벤트 5초/제어 2초, claim/401, 24시간 안정성 순으로 AC 확인.
 5. 로그: `docker logs gateway-agent`, `docker logs matterjs-server`, `docker exec otbr ot-ctl state`, `~/install2.log`.
