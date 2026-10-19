@@ -17,6 +17,7 @@ export class MatterClient extends EventEmitter {
     this.serverInfo = null;
     this.closed = false;
     this.reconnectDelay = 1000;
+    this.everConnected = false;   // 한 번이라도 연결된 적이 있으면 이후 실패해도 계속 재접속
   }
 
   connect() {
@@ -26,7 +27,7 @@ export class MatterClient extends EventEmitter {
       const ws = new WebSocket(this.url);
       this.ws = ws;
       let settled = false, opened = false;
-      ws.on('open', () => { opened = true; this.reconnectDelay = 1000; });
+      ws.on('open', () => { opened = true; this.everConnected = true; this.reconnectDelay = 1000; });
       ws.on('message', (raw) => {
         let msg;
         try { msg = JSON.parse(raw.toString()); } catch { return; }
@@ -53,7 +54,9 @@ export class MatterClient extends EventEmitter {
         for (const p of this.pending.values()) p.reject(new Error('connection closed'));
         this.pending.clear();
         this.emit('disconnected');
-        if (!this.closed && opened) {           // 한 번이라도 연결된 뒤에만 자동 재접속 (최초 실패는 호출자가 재시도)
+        // 최초 연결 실패는 호출자(index.js)가 백오프로 재시도한다. 한 번이라도 연결된 뒤에는 재접속 시도가
+        // 실패(ECONNREFUSED 등)해도 여기서 계속 예약한다 — 예전엔 opened 만 봐서 서버 재시작 후 영구히 멈췄다.
+        if (!this.closed && (opened || this.everConnected)) {
           log.warn(`disconnected, reconnecting in ${this.reconnectDelay}ms`);
           setTimeout(() => this.connect().then(() => this.emit('reconnected')).catch(() => {}), this.reconnectDelay);
           this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);

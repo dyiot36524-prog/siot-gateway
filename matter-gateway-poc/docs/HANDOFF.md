@@ -70,15 +70,16 @@ matter-gateway-poc/
   1. compose `otbr` 의 `sysctls:` 블록 → `network_mode: host` 에서 Docker 가 거부. 제거하고 `host/99-matter-thread.conf` 에 `net.ipv4.ip_forward=1`, `disable_ipv6=0` 추가.
   2. `data/matter` 가 root 소유 → matterjs-server(uid 1000) 가 `/data/config` EACCES 로 재시작 반복. `install.sh` 가 이미지 uid 로 chown 하도록 수정.
   3. `install.sh` 동글 감지에 Silicon Labs MG21 계열(SONOFF 등) 추가.
+  4. matterjs-server 헬스체크가 `wget`(이미지에 없음) 이라 unhealthy → `curl` 로 변경.
+  5. 에이전트 `matterClient.js`: 서버 재시작 후 첫 재접속이 ECONNREFUSED 면 영구히 멈추던 버그 → `everConnected` 로 계속 백오프 재시도. 회귀 테스트 `test/matterClient.test.js` 추가 (npm test 17건).
 - **동작 확인됨** (install.sh 1차 실행 실패 후 수동으로 compose 기동):
   - OTBR: `leader`, `br state running`, 네트워크 `siot-btaylo` 채널 18 PAN 0x4E8B, REST 8081.
   - matterjs-server: 컨트롤러 기동, WS 127.0.0.1:5580, BLE enabled(hci0), 에이전트가 OTBR 데이터셋을 `set_thread_dataset` 로 자동 등록(xp=9ED1A30B9D3178C2).
   - 에이전트: gatewayId `gw_dd10c2c3-cc5c-5a82-ac12-4dd7f0bd424d`, 로컬 페이지 `http://192.168.0.172:3000` (mDNS `siot-dd10c2c3.local`, `_siot._tcp` Mac 에서 발견됨), 토큰 없는 플랫폼 API 401.
-- **미완료**: `matter-gateway.service` systemd 등록(= AC-1 재부팅 복구). 고친 `install.sh` 를 Pi 에서 `sudo ./install.sh` 로 재실행하면 완료됨(멱등). 저장소 변경 커밋/푸시 전이라 `curl ... install.sh | sudo bash` 경로는 아직 옛 버전.
+- **systemd 등록 완료**: `sudo ./install.sh` 재실행으로 `matter-gateway.service` enabled/active. 세 컨테이너 모두 healthy. 재부팅 복구(AC-1) 실측은 전원 재투입으로 확인 예정.
 
 ## 6. 바로 다음 할 일
-1. Pi 에서 `cd ~/matter-gateway-poc && sudo ./install.sh` 재실행 → `systemctl is-enabled matter-gateway.service` 가 enabled 인지, 재부팅 후 3000 포트가 다시 뜨는지(AC-1).
-2. 저장소 변경(install.sh, docker-compose.yml, host/*, README, HANDOFF) 커밋·푸시.
+1. 전원 재투입 후 `http://192.168.0.172:3000/healthz` 가 다시 뜨는지(AC-1). Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용).
 3. 로컬 페이지에서 MYGGBETT / GRILLPLATS 커미셔닝(AC-5). 실패 시 `docker logs matterjs-server` 의 BLE/PASE 단계 확인 → 임베드 백엔드 전환(README "Matter 백엔드 전환").
 4. 이벤트 5초/제어 2초, claim/401, 24시간 안정성 순으로 AC 확인.
 5. 로그: `docker logs gateway-agent`, `docker logs matterjs-server`, `docker exec otbr ot-ctl state`, `~/install2.log`.
