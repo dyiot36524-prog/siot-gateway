@@ -50,6 +50,9 @@ else
 fi
 cd "$TARGET"
 mkdir -p data/otbr data/matter data/agent
+# matterjs-server 이미지는 비root(기본 1000:1000)로 실행되므로 데이터 디렉터리 소유권을 맞춘다
+MATTER_UID=$(docker image inspect ghcr.io/matter-js/matterjs-server:stable --format '{{.Config.User}}' 2>/dev/null || true)
+chown -R "${MATTER_UID:-1000:1000}" data/matter
 [ -f rules.json ] || cp agent/rules.example.json rules.json
 
 # ── 4. 커널/네트워크 설정 ────────────────────────────────────────────────
@@ -73,11 +76,16 @@ ZBT2_DEV="${ZBT2_DEV:-}"
 if [ -z "$ZBT2_DEV" ]; then
   ZBT2_DEV=$(ls /dev/serial/by-id/ 2>/dev/null | grep -i -m1 "ZBT-2\|Nabu_Casa\|Home_Assistant_Connect" | sed 's#^#/dev/serial/by-id/#' || true)
 fi
+# ZBT-2 가 없으면 EFR32MG21 계열 Silicon Labs 동글(SONOFF Dongle-E/Lite 등, OpenThread RCP 펌웨어 필요)도 허용
 if [ -z "$ZBT2_DEV" ]; then
-  log "경고: ZBT-2 를 찾지 못했습니다. USB 2.0 포트에 꽂고 다시 실행하거나 .env 의 ZBT2_DEV 를 직접 지정하세요. (임시로 /dev/ttyACM0 사용)"
+  ZBT2_DEV=$(ls /dev/serial/by-id/ 2>/dev/null | grep -i -m1 "SONOFF.*MG21\|SkyConnect\|Silicon_Labs_CP210" | sed 's#^#/dev/serial/by-id/#' || true)
+  [ -n "$ZBT2_DEV" ] && log "ZBT-2 대신 Silicon Labs 동글 사용: $ZBT2_DEV (OpenThread RCP 펌웨어인지 확인 필요)"
+fi
+if [ -z "$ZBT2_DEV" ]; then
+  log "경고: Thread 동글(ZBT-2 등)을 찾지 못했습니다. USB 2.0 포트에 꽂고 다시 실행하거나 .env 의 ZBT2_DEV 를 직접 지정하세요. (임시로 /dev/ttyACM0 사용)"
   ZBT2_DEV=/dev/ttyACM0
 else
-  log "ZBT-2: $ZBT2_DEV"
+  log "Thread 동글: $ZBT2_DEV"
 fi
 
 # ── 6. .env ──────────────────────────────────────────────────────────────
@@ -97,6 +105,8 @@ fi
 # ── 7. 컨테이너 빌드/기동 ────────────────────────────────────────────────
 log "컨테이너 빌드 및 기동 (최초 수 분 소요)"
 docker compose pull --ignore-buildable --quiet || true
+MATTER_UID=$(docker image inspect ghcr.io/matter-js/matterjs-server:stable --format '{{.Config.User}}' 2>/dev/null || true)
+chown -R "${MATTER_UID:-1000:1000}" data/matter
 docker compose build --quiet agent
 docker compose up -d otbr
 # ── 8. Thread 네트워크 형성(최초 1회) ───────────────────────────────────

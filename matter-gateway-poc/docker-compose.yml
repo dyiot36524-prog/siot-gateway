@@ -11,10 +11,8 @@ services:
     devices:
       - ${ZBT2_DEV:-/dev/ttyACM0}:/dev/ttyACM0
       - /dev/net/tun:/dev/net/tun
-    sysctls:
-      net.ipv6.conf.all.disable_ipv6: 0
-      net.ipv4.conf.all.forwarding: 1
-      net.ipv6.conf.all.forwarding: 1
+    # 주의: network_mode: host 에서는 컨테이너 sysctls(net.*) 를 Docker 가 거부한다.
+    #       포워딩/accept_ra 는 host/99-matter-thread.conf(호스트 sysctl) 에서 설정한다.
     environment:
       OT_RCP_DEVICE: "spinel+hdlc+uart:///dev/ttyACM0?uart-baudrate=460800"   # ZBT-2 OpenThread RCP 펌웨어 기본 보율
       OT_INFRA_IF: ${BACKBONE_IF:-eth0}
@@ -46,7 +44,7 @@ services:
       - ./data/matter:/data
       - /run/dbus:/run/dbus:ro
     healthcheck:
-      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:5580/ >/dev/null"]
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5580/"]   # 이미지에 wget 없음, curl 있음
       interval: 30s
       timeout: 5s
       retries: 5

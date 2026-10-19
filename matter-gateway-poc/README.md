@@ -34,7 +34,12 @@ docs/                   설계 평가, 커미셔닝 설명, 중립 모델 명세
 ## 설치 (Raspberry Pi 5)
 
 1. Raspberry Pi Imager 로 **Raspberry Pi OS Lite (64-bit)** 를 NVMe(또는 SD) 에 기록. 사용자/SSH 활성화. (NVMe 부팅은 `sudo rpi-eeprom-update -a` 후 부트 순서 조정)
-2. ZBT-2 를 **USB 2.0 포트(검정)** 에 꽂는다. 펌웨어가 Thread(OpenThread RCP)인지 확인 — 아니면 Open Home Foundation Toolbox(Chromium) 에서 "OpenThread (RCP)" 설치 또는 `host/flash-zbt2.sh`.
+   - SSH 를 켜지 않고 구웠다면: SSD 를 PC 에 꽂고 `bootfs` 에 빈 파일 `ssh` 를 만든다 (`host/enable-ssh-bootfs.sh`). 2025-10 이후 cloud-init 이미지(Trixie)는 Imager 설정이 `bootfs/user-data` 에 있고 로그인 사용자명도 거기서 확인한다.
+   - Mac 에서 `siot.local` 이 공인 IP 로 풀리면 ISP DNS 가로채기다. `dns-sd -B _workstation._tcp local` 로 Pi 의 IP 를 찾아 IP 로 접속한다.
+2. Thread 동글을 **USB 2.0 포트(검정)** 에 꽂는다. 펌웨어가 Thread(OpenThread RCP)인지 확인한다.
+   - **ZBT-2**: Open Home Foundation Toolbox(Chromium) 에서 "OpenThread (RCP)" 설치 또는 `host/flash-zbt2.sh`.
+   - **SONOFF Dongle Lite MG21 (LMG21)** 도 동작 확인됨(2026-10-19). 출고 펌웨어는 Zigbee EZSP 이므로 `host/flash-thread-rcp.sh` 로 iHost 공식 저장소의 `donglelmg21_mg21_openthread_stable_2.4.4_460800.gbl` 을 올린다. 보율 460800, 하드웨어 흐름제어 **끔**(compose 기본값).
+   - 펌웨어 종류 확인: `universal-silabs-flasher --device <by-id 경로> --probe-methods spinel:460800,ezsp:115200 probe`
 3. Pi 를 공유기에 **유선(eth0)** 으로 연결하고 SSH 접속 후:
    ```bash
    curl -fsSL https://raw.githubusercontent.com/dyiot36524-prog/siot-gateway/main/matter-gateway-poc/install.sh | sudo bash
@@ -42,7 +47,7 @@ docs/                   설계 평가, 커미셔닝 설명, 중립 모델 명세
    (저장소를 받아 둔 경우 `sudo ./install.sh`. 무선 백본이면 `sudo BACKBONE_IF=wlan0 ./install.sh`)
 4. 스크립트가 끝나면 출력된 `http://siot-<shortId>.local:3000` 을 폰(같은 Wi-Fi)에서 연다.
 
-설치 스크립트가 하는 일: Docker/BlueZ 설치 → sysctl(IPv6 accept_ra=2, conntrack 3600) → systemd 유닛(`matter-gateway.service`, `ipv6-forwarding-fix.service`) → ZBT-2 장치 경로 감지 → `.env` 생성 → OTBR 기동과 Thread 네트워크 형성 → 전체 compose 기동. 재실행해도 안전하다.
+설치 스크립트가 하는 일: Docker/BlueZ 설치 → sysctl(IPv6 accept_ra=2, conntrack 3600) → systemd 유닛(`matter-gateway.service`, `ipv6-forwarding-fix.service`) → Thread 동글(ZBT-2 또는 Silicon Labs MG21 계열) 장치 경로 감지 → `.env` 생성 → OTBR 기동과 Thread 네트워크 형성 → 전체 compose 기동. 재실행해도 안전하다.
 
 ## 합격 기준 검증 절차
 

@@ -1,4 +1,4 @@
-# 인수인계 — Matter/Thread 게이트웨이 (2026-10-16 기준)
+# 인수인계 — Matter/Thread 게이트웨이 (2026-10-19 기준)
 
 새 세션에서 이 문서만 읽으면 이어서 작업할 수 있도록 지금까지의 결정, 만든 것, 현재 상태, 다음 할 일을 정리한다.
 
@@ -61,25 +61,27 @@ matter-gateway-poc/
 - **Thread 데이터셋**: 에이전트가 OTBR REST(127.0.0.1:8081)에서 읽어 Matter 컨트롤러에 자동 등록.
 - **중요 리스크**: matterjs-server README 는 단독 `--ble` 모드에서 Thread 기기 커미셔닝을 "미지원"이라 적음(소스에는 명령이 있어 실측 필요). 실패하면 임베드 백엔드로 전환(README "Matter 백엔드 전환").
 
-## 5. 현재 진행 상황 (막힌 지점)
-- SSD 에 Raspberry Pi OS Lite 64-bit 를 Mac 에서 Imager 로 기록함. 호스트명 **`siot`**, 사용자명은 아마 **`kwangsu`**(Imager 기본값), Wi-Fi 없음. SSH 활성화 여부는 불확실.
-- Pi 에 SSD 장착, 유선 랜·전원 연결 완료. ZBT-2 는 USB 2.0 포트에 꽂아야 함(아직 확인 안 됨). ZBT-2 펌웨어가 Thread(OpenThread RCP)인지도 확인 필요.
-- Mac 에서 `ping siot.local` 은 응답. `ssh -v kwangsu@siot.local` 은 `Connecting to siot.local port 22` 에서 멈춤(refused 아님 = 응답 없음).
-  - 가능 원인: (a) 첫 부팅/재부팅 중, (b) `siot.local` 이 다른 기기(예: 기존 HA 기반 시옷 게이트웨이)로 풀림, (c) SSH 미활성.
-  - 확인 명령(Mac): `ping -c 2 siot.local; nc -vz -w 5 siot.local 22; arp -a` → IP 의 MAC 이 `2c:cf:67`/`d8:3a:dd`/`dc:a6:32`/`e4:5f:01`/`b8:27:eb` 로 시작하면 Pi.
-  - `refused` 면 SSD 를 Mac 에 꽂아 bootfs 에 빈 파일 `ssh` 생성. 부팅 자체가 안 되면(초록 LED 없음) Imager 의 Bootloader 업데이트 이미지를 SD 로 한 번 부팅.
-- 클라우드 세션은 댁 LAN 에 닿지 않으므로, **Mac 에서 로컬 세션**(`git clone ... && cd siot-gateway && claude`)으로 Pi 접속·설치를 진행하기로 함.
+## 5. 현재 진행 상황 (2026-10-19, Mac 로컬 세션에서 실기기 설치)
+- **Pi 접속**: 호스트명 `siot`, 유선 eth0 `192.168.0.172` (MAC `88:a2:9e:99:d1:16`). 로그인 사용자는 **`gslt`** (Imager 설정, kwangsu 아님). Mac 공개키 `~/.ssh/id_ed25519` 등록됨 → `ssh gslt@192.168.0.172`. `sudo` 는 비밀번호 필요(NOPASSWD 아님), gslt 는 `docker` 그룹.
+  - Mac 에서 `siot.local` 은 ISP DNS 가로채기로 공인 IP 로 풀리므로 IP 로 접속. 이전 세션의 "ssh 멈춤"은 이 때문이었음.
+  - OS 는 Raspberry Pi OS Lite 2026-10-06 (Trixie, cloud-init). SSH 는 bootfs `ssh` 파일 + `user-data` 수정으로 활성화함(`host/enable-ssh-bootfs.sh` 참고).
+- **동글**: ZBT-2 가 아니라 **SONOFF Dongle Lite MG21**(EFR32MG21, CP210x, `/dev/ttyUSB0`) 이 꽂혀 있음. 출고 펌웨어 Zigbee EZSP 7.4.5 → iHost 공식 저장소의 `donglelmg21_mg21_openthread_stable_2.4.4_460800.gbl` 로 플래시 완료 (`SL-OPENTHREAD/2.4.4.0`, 460800, 흐름제어 끔). 되돌리기용 `donglelmg21_mg21_zigbee_factory_7.4.5_115200.gbl` 은 Pi `~/firmware/` 에 있음. 플래시 도구: `~/usf/bin/universal-silabs-flasher`, 스크립트 `host/flash-thread-rcp.sh`.
+- **설치 중 발견·수정한 버그** (저장소에 반영, 커밋 필요):
+  1. compose `otbr` 의 `sysctls:` 블록 → `network_mode: host` 에서 Docker 가 거부. 제거하고 `host/99-matter-thread.conf` 에 `net.ipv4.ip_forward=1`, `disable_ipv6=0` 추가.
+  2. `data/matter` 가 root 소유 → matterjs-server(uid 1000) 가 `/data/config` EACCES 로 재시작 반복. `install.sh` 가 이미지 uid 로 chown 하도록 수정.
+  3. `install.sh` 동글 감지에 Silicon Labs MG21 계열(SONOFF 등) 추가.
+- **동작 확인됨** (install.sh 1차 실행 실패 후 수동으로 compose 기동):
+  - OTBR: `leader`, `br state running`, 네트워크 `siot-btaylo` 채널 18 PAN 0x4E8B, REST 8081.
+  - matterjs-server: 컨트롤러 기동, WS 127.0.0.1:5580, BLE enabled(hci0), 에이전트가 OTBR 데이터셋을 `set_thread_dataset` 로 자동 등록(xp=9ED1A30B9D3178C2).
+  - 에이전트: gatewayId `gw_dd10c2c3-cc5c-5a82-ac12-4dd7f0bd424d`, 로컬 페이지 `http://192.168.0.172:3000` (mDNS `siot-dd10c2c3.local`, `_siot._tcp` Mac 에서 발견됨), 토큰 없는 플랫폼 API 401.
+- **미완료**: `matter-gateway.service` systemd 등록(= AC-1 재부팅 복구). 고친 `install.sh` 를 Pi 에서 `sudo ./install.sh` 로 재실행하면 완료됨(멱등). 저장소 변경 커밋/푸시 전이라 `curl ... install.sh | sudo bash` 경로는 아직 옛 버전.
 
-## 6. 바로 다음 할 일 (로컬 세션)
-1. Pi 찾기 → `ssh kwangsu@<ip>` 접속.
-2. 설치:
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/dyiot36524-prog/siot-gateway/main/matter-gateway-poc/install.sh | sudo bash
-   ```
-   완료 메시지의 `http://siot-<shortId>.local:3000` 을 폰에서 열기.
-3. 합격 기준 AC-1~AC-13 순서로 확인(`matter-gateway-poc/README.md` 표). 순서: 재부팅 복구 → OTBR leader/데이터셋 자동 등록 → mDNS → MYGGBETT/GRILLPLATS 커미셔닝(로컬 페이지) → 이벤트 5초/제어 2초 → claim/401 → 24시간.
-4. 로그 수집: 설치 스크립트 출력, `docker logs gateway-agent`, `docker logs matterjs-server`, `docker exec otbr ot-ctl state`.
-5. AC-5 커미셔닝 실패 시: `docker compose stop matter agent && MATTER_BACKEND=embedded docker compose --profile embedded up -d --build agent-embedded`.
+## 6. 바로 다음 할 일
+1. Pi 에서 `cd ~/matter-gateway-poc && sudo ./install.sh` 재실행 → `systemctl is-enabled matter-gateway.service` 가 enabled 인지, 재부팅 후 3000 포트가 다시 뜨는지(AC-1).
+2. 저장소 변경(install.sh, docker-compose.yml, host/*, README, HANDOFF) 커밋·푸시.
+3. 로컬 페이지에서 MYGGBETT / GRILLPLATS 커미셔닝(AC-5). 실패 시 `docker logs matterjs-server` 의 BLE/PASE 단계 확인 → 임베드 백엔드 전환(README "Matter 백엔드 전환").
+4. 이벤트 5초/제어 2초, claim/401, 24시간 안정성 순으로 AC 확인.
+5. 로그: `docker logs gateway-agent`, `docker logs matterjs-server`, `docker exec otbr ot-ctl state`, `~/install2.log`.
 
 ## 7. 그 다음 단계(우선순위)
 1. 실기기 검증 결과로 코드 수정(예상 지점: matterjs-server 노드 스냅샷 필드, BLE 안정성, 슬리피 장치 구독).
