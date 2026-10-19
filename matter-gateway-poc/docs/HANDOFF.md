@@ -49,6 +49,7 @@ matter-gateway-poc/
                              static/(로컬 페이지)
     pairing.js, commands.js, rules.js, cli.js
   agent/test/                normalize, threadDataset, platform(계약), matterClient, pairing(재시도), siotMapper(실기기 스냅샷) — npm test 26건 통과
+  scripts/stability-check.sh 24시간 안정성 점검(재접속·세션/구독 오류·재시작·기기 online·BLE timeout·OTBR). Pi 에서 실행 또는 `ssh gslt@<pi> bash -s 24h < scripts/stability-check.sh`
   docs/                      assessment.md, commissioning.md, neutral-model.md, spec-pi-install.md,
                              openapi.yaml(플랫폼 API 명세), platform-integration.md(앱 페어링 화면 가이드), HANDOFF.md(이 문서)
 ```
@@ -84,7 +85,7 @@ matter-gateway-poc/
 ## 5b. 실기기 커미셔닝 결과 (2026-10-20 00:00~01:00, 별도 세션)
 GRILLPLATS(QR `MT:CUO000QV1769DQ3C310`, disc 1671) 와 MYGGBETT(QR `MT:QDKT1CEK01O7BL12I00`, disc 2993) 모두 로컬 페이지/`POST /api/pairing` 경로로 커미셔닝 성공.
 - 기기: `matter:5:1` PLUG `{switch, power, energy}` (GRILLPLATS Plug, fw 1.4.6), `matter:6:1` BINARY_SENSOR `{active, measurement:"door", battery, batteryLow}` (MYGGBETT, fw 1.0.9).
-- **AC 현황**: 페어링(AC-5) 통과 2/2 · 플러그 제어 2초(AC): 20회 중 19회 <2초(중앙값 ~0.7초, 최대 2.13초) 통과 · 문열림 이벤트 5초: 통과(SSE 는 상태 변경 후 30~500ms 내 전달, 로컬 페이지 즉시 반영 확인) · claim/401: 토큰 없는 401 확인, claim 흐름은 계약 테스트로만 확인 · **24시간 안정성: 미실시**.
+- **AC 현황**: 페어링(AC-5) 통과 2/2 · 플러그 제어 2초(AC): 20회 중 19회 <2초(중앙값 ~0.7초, 최대 2.13초) 통과 · 문열림 이벤트 5초: 통과(SSE 는 상태 변경 후 30~500ms 내 전달, 로컬 페이지 즉시 반영 확인) · claim/401: 토큰 없는 401 확인, claim 흐름은 계약 테스트로만 확인 · 24시간 안정성·재부팅 복원: 아래 5c.
 - Thread: 플러그는 라우터(0xdc00, RSSI -58, LQ 3) 로 승격. OTBR ping 손실 0%, RTT 22~61ms. 가입 직후 수 분간 MAC NoAck → MRP 재전송(SII 2초 기준 3.8/9/14.6/25초 지연) 이 있었고 이후 안정화.
 
 ### 실패 원인과 수정 (모두 저장소 반영)
@@ -97,9 +98,27 @@ GRILLPLATS(QR `MT:CUO000QV1769DQ3C310`, disc 1671) 와 MYGGBETT(QR `MT:QDKT1CEK0
 - 테스트: `npm test` 26건 통과(pairing 5, siotMapper 4 추가). CI 워크플로의 "15건" 문구는 수치만 옛것.
 - 기타: 플러그 BLE 랜덤 주소가 재광고마다 바뀌어 noble dbus 프록시가 stale 해지는 로그(`interface not found in proxy object`)는 무해(재발견 후 진행). Pi USB 의 "CX 2.4G Wireless Receiver"(무선 키보드 수신기) 는 2.4GHz 간섭원일 수 있음(미검증). QR 은 사진을 OpenCV `QRCodeDetector` 로 디코드(흐린 사진은 축소+적응 임계값 필요).
 
+## 5c. 24시간 안정성·재부팅 복원 검증 (2026-10-20 01:00~01:15, 별도 세션)
+두 기기가 붙은 상태에서 측정. 코드 수정은 없었고 `scripts/stability-check.sh` 만 추가.
+
+| 항목 | 결과 |
+|---|---|
+| 플러그 제어 2초 (재측정, ON/OFF 각 10회) | **통과** 20/20. HTTP 응답 중앙값 0.69s, SSE 확정 중앙값 0.72s, 최대 1.17s, 2초 초과 0 |
+| 문열림 이벤트 SSE | **통과**. 재부팅 전 자석 조작 11건, 재부팅 후 에이전트 기동 약 1분 뒤 조작 8건 모두 `/api/stream` 으로 전달 |
+| 재부팅 복원 (AC-1, 기기 붙은 상태, 전원 재투입) | **통과**. 컨테이너 3개 healthy, 에이전트 `synced 2 nodes`(matterjs-server 보다 먼저 떠서 ECONNREFUSED 2회 → 백오프 후 6초 내 동기), matterjs-server 가 저장된 CASE 재개 레코드로 플러그 1초·센서 4초 내 online + 구독 재설정, `Registered Thread credentials from stored`, OTBR `leader` 1초 내, `ble-conn-params.service` Result=success |
+| 24시간 안정성 | **창 미완료 — 진행 중**. 기준 시작 2026-10-20 01:06 KST(재부팅 후). 01:00~01:15 구간: 에이전트 재접속 0, matterjs-server ERROR 0·세션 오류 0·구독 끊김 0, 컨테이너 재시작 0, 센서 battery 100 유지(센서 구독 max interval 30분 → 배터리는 변화 시 또는 30분 주기로만 보고됨) |
+
+재점검(창이 지난 뒤): `ssh gslt@192.168.0.172 bash -s 24h < scripts/stability-check.sh` — 종료 코드 0 이면 통과, `!!` 줄이 경고 항목.
+
+### 발견 사항 (기능 영향 없음, 코드 수정 없음)
+1. **Pi 5 RTC 배터리 없음 → 부팅 직후 시각 지연.** 커널이 RTC 를 1970 으로 읽고 systemd 가 `/var/lib/systemd/timesync/clock` 의 마지막 저장 시각(01:03:29)으로 올린 뒤, NTP 동기(실시간 01:06:18)까지 약 1.5~2분 뒤처진 채 동작. 그 사이 docker 로그·`lastUpdated` 가 과거 시각으로 찍히고, 동기 순간 시각이 앞으로 점프하면서 matter.js 가 플러그 구독(timeout 1m39s)을 1회 재설정(01:06:34). 제어·이벤트 영향 없음. 24시간 로그를 읽을 때 부팅 직후 구간은 감안할 것. 정확한 타임스탬프가 필요하면 RTC 배터리(Pi 5 공식 RTC battery) 장착.
+2. 재부팅 후 센서(MYGGBETT)가 OTBR 리더가 아니라 **플러그 라우터(0xdc00)의 자식**으로 재부착됨(`ot-ctl eidcache` 에서 두 ML-EID 모두 dc00 경유, `child table` 비어 있음). 이벤트 전달 정상 — 플러그를 빼면 센서가 리더로 재부착해야 하므로 추후 "플러그 제거 시 센서 유지" 도 한 번 확인할 가치 있음.
+3. OTBR 부팅 약 6분 뒤 플러그로 UDP 전송 NoAck 2건(일시적, 이후 없음).
+4. `sudo -n` 은 터미널 탭에서 비밀번호를 입력해 sudo 캐시가 살아 있을 때만 통과. 재부팅 직후 `supervision_timeout` 직접 읽기는 터미널 탭에서 `sudo cat` 필요(서비스 Result=success 로 쓰기 성공은 확인, 직접 읽기 값은 확인 대기).
+
 ## 6. 바로 다음 할 일
 1. (완료) AC-1 재부팅 복구, (완료) AC-5 두 기기 커미셔닝·제어·이벤트. Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용). 소스 수정 후 반영: `rsync` 로 `~/matter-gateway-poc` 갱신 → `sudo ./install.sh` 재실행(멱등) 또는 `/opt/matter-gateway` 에서 `docker compose build agent && docker compose up -d`.
-2. **24시간 안정성(AC)**: 두 기기 붙은 채 하루 두고 `docker logs gateway-agent` 의 재접속/`matterjs-server` 의 세션 오류, 센서 배터리 보고 주기, 재부팅 후 두 기기 복원(`synced 2 nodes`) 확인. 재부팅 후 `ble-conn-params.service` 가 supervision_timeout=200 을 적용하는지(`sudo cat /sys/kernel/debug/bluetooth/hci0/supervision_timeout`) 확인.
+2. **24시간 안정성(AC)**: 창 시작 2026-10-20 01:06 KST. 2026-10-21 01:06 이후 `scripts/stability-check.sh` 로 재점검해 5c 표를 갱신(재접속·세션 오류·구독 끊김 0, 두 기기 online, 센서 battery 보고 확인). 재부팅 복원은 5c 에서 통과.
 3. claim 흐름 실측(플랫폼팀 또는 curl 로 `POST /siot-app/api/v1/claim`) 과 플랫폼 페어링 화면 연동.
 4. matterjs-server 가 matter.js > 0.17.9 로 올라오면 `host/patches` bind-mount 와 `MATTER_IMAGE` 재검토. 추가 기기(IKEA 조명 등)로 멀티 어드민(commissioning-window) 검증.
 5. 로그: `docker logs gateway-agent`, `docker logs matterjs-server`, `docker exec otbr ot-ctl state|neighbor table`, `~/install2.log`. BLE 심층 추적은 `sudo btmon`.
