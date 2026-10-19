@@ -25,7 +25,8 @@ services:
     # 웹 GUI: http://<pi>:80 , REST: http://127.0.0.1:8081 (에이전트가 데이터셋 자동 등록에 사용)
 
   matter:
-    image: ghcr.io/matter-js/matterjs-server:stable
+    # 기본은 stable. BLE 연결 재시도 수정(matter.js 0.17.9 이후)이 필요하면 .env 의 MATTER_IMAGE 로 dev 빌드/digest 를 지정
+    image: ${MATTER_IMAGE:-ghcr.io/matter-js/matterjs-server:stable}
     container_name: matterjs-server
     restart: unless-stopped
     network_mode: host
@@ -35,7 +36,8 @@ services:
       PRIMARY_INTERFACE: ${BACKBONE_IF:-eth0}
       LISTEN_ADDRESS: 127.0.0.1          # 에이전트만 접근. 대시보드 보려면 ,${BACKBONE_IF} 추가
       PRODUCTION_MODE: "true"
-      VENDOR_ID: "0xfff1"                # 테스트 VID. 상용은 CSA 발급 VID 로 교체
+      VENDOR_ID: "65521"                 # 테스트 VID 0xFFF1. 반드시 10진수! (matter-server 1.4.0 은 parseInt(v,10) 이라 "0xfff1" → 0 이 되어
+                                         #  패브릭 adminVendorId=0 → 기기가 AddNOC 를 INVALID_COMMAND(0x85) 로 거부함). 상용은 CSA 발급 VID
       FABRIC_ID: "1"
       NOBLE_BINDINGS: dbus               # 호스트 BlueZ 사용 (root 불필요)
       BLUETOOTH_ADAPTER: "0"
@@ -43,6 +45,8 @@ services:
     volumes:
       - ./data/matter:/data
       - /run/dbus:/run/dbus:ro
+      # BLE 연결 재시도 백포트 (host/patches/matterjs-server/NobleBleChannel.js 머리말 참고). matter.js > 0.17.9 이미지에서는 제거
+      - ./host/patches/matterjs-server/NobleBleChannel.js:/app/node_modules/@matter/nodejs-ble/dist/esm/NobleBleChannel.js:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:5580/"]   # 이미지에 wget 없음, curl 있음
       interval: 30s
@@ -65,6 +69,7 @@ services:
       SIOT_MACHINE_ID_FILE: /host/machine-id
       MATTER_BACKEND: ${MATTER_BACKEND:-server}
       MATTER_WS_URL: ws://127.0.0.1:5580/ws
+      PAIRING_MAX_ATTEMPTS: ${PAIRING_MAX_ATTEMPTS:-3}   # BLE 링크 실패 시 커미셔닝 재시도 횟수
       OTBR_REST_URL: http://127.0.0.1:8081
       RULES_FILE: /app/rules.json
       DATA_DIR: /app/data

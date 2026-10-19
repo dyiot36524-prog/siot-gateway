@@ -1,4 +1,4 @@
-# 인수인계 — Matter/Thread 게이트웨이 (2026-10-19 기준)
+# 인수인계 — Matter/Thread 게이트웨이 (2026-10-20 기준)
 
 새 세션에서 이 문서만 읽으면 이어서 작업할 수 있도록 지금까지의 결정, 만든 것, 현재 상태, 다음 할 일을 정리한다.
 
@@ -36,7 +36,8 @@ matter-gateway-poc/
   install.sh                 Pi OS 에서 sudo 로 1회 실행 (멱등). /opt/matter-gateway 에 설치
   docker-compose.yml         otbr(openthread/border-router:v2026.10.0, OT_* 환경변수) / matter(matterjs-server) / agent
                              (+ profile embedded: agent-embedded)
-  host/                      99-matter-thread.conf(sysctl), ipv6-forwarding-fix.service, matter-gateway.service, flash-zbt2.sh
+  host/                      99-matter-thread.conf(sysctl), ipv6-forwarding-fix.service, ble-conn-params.service(BLE supervision timeout), matter-gateway.service,
+                             flash-zbt2.sh, flash-thread-rcp.sh, patches/matterjs-server/NobleBleChannel.js(BLE 재시도 백포트, compose 가 bind-mount)
   agent/src/
     index.js                 진입점: 플랫폼 API → mDNS → 릴레이 → Matter 백엔드 연결(백오프) → OTBR 데이터셋 자동 등록
     matterBackend.js         MATTER_BACKEND=server|embedded 선택
@@ -47,7 +48,7 @@ matter-gateway-poc/
                              registration.js, siotMapper.js(중립→SiotDevice, action 매핑), mdns.js, relay.js, otbr.js,
                              static/(로컬 페이지)
     pairing.js, commands.js, rules.js, cli.js
-  agent/test/                normalize, threadDataset, platform(계약 테스트) — npm test 15건 통과
+  agent/test/                normalize, threadDataset, platform(계약), matterClient, pairing(재시도), siotMapper(실기기 스냅샷) — npm test 26건 통과
   docs/                      assessment.md, commissioning.md, neutral-model.md, spec-pi-install.md,
                              openapi.yaml(플랫폼 API 명세), platform-integration.md(앱 페어링 화면 가이드), HANDOFF.md(이 문서)
 ```
@@ -78,13 +79,30 @@ matter-gateway-poc/
   - 에이전트: gatewayId `gw_dd10c2c3-cc5c-5a82-ac12-4dd7f0bd424d`, 로컬 페이지 `http://192.168.0.172:3000` (mDNS `siot-dd10c2c3.local`, `_siot._tcp` Mac 에서 발견됨), 토큰 없는 플랫폼 API 401.
 - **systemd 등록 완료**: `sudo ./install.sh` 재실행으로 `matter-gateway.service` enabled/active. 세 컨테이너 모두 healthy.
 - **AC-1 재부팅 복구 통과** (2026-10-19 23:21 전원 재투입): 부팅 후 약 1분 내 3000 포트 healthz 응답, OTBR 이 저장된 데이터셋으로 `leader`/`br running`, matterjs-server 가 저장된 Thread 자격 복원(`Registered Thread credentials from stored`), 에이전트 synced·mDNS 광고, 토큰 없는 API 401. `ipv6-forwarding-fix.service` 는 oneshot 이라 실행 후 inactive 로 보이는 것이 정상(sysctl 값은 적용됨).
-- **합격 기준 현황**: AC-1 통과, mDNS/로컬페이지/401 확인. 미확인: AC-5 이후(실기기 커미셔닝, 이벤트/제어 지연, claim, 24시간).
+- **합격 기준 현황(2026-10-19 밤)**: AC-1 통과, mDNS/로컬페이지/401 확인. → 실기기 커미셔닝 결과는 아래 5b.
+
+## 5b. 실기기 커미셔닝 결과 (2026-10-20 00:00~01:00, 별도 세션)
+GRILLPLATS(QR `MT:CUO000QV1769DQ3C310`, disc 1671) 와 MYGGBETT(QR `MT:QDKT1CEK01O7BL12I00`, disc 2993) 모두 로컬 페이지/`POST /api/pairing` 경로로 커미셔닝 성공.
+- 기기: `matter:5:1` PLUG `{switch, power, energy}` (GRILLPLATS Plug, fw 1.4.6), `matter:6:1` BINARY_SENSOR `{active, measurement:"door", battery, batteryLow}` (MYGGBETT, fw 1.0.9).
+- **AC 현황**: 페어링(AC-5) 통과 2/2 · 플러그 제어 2초(AC): 20회 중 19회 <2초(중앙값 ~0.7초, 최대 2.13초) 통과 · 문열림 이벤트 5초: 통과(SSE 는 상태 변경 후 30~500ms 내 전달, 로컬 페이지 즉시 반영 확인) · claim/401: 토큰 없는 401 확인, claim 흐름은 계약 테스트로만 확인 · **24시간 안정성: 미실시**.
+- Thread: 플러그는 라우터(0xdc00, RSSI -58, LQ 3) 로 승격. OTBR ping 손실 0%, RTT 22~61ms. 가입 직후 수 분간 MAC NoAck → MRP 재전송(SII 2초 기준 3.8/9/14.6/25초 지연) 이 있었고 이후 안정화.
+
+### 실패 원인과 수정 (모두 저장소 반영)
+1. **BLE 초기 연결 불안정** — Pi 5 내장 BT(BCM4345C0) ↔ IKEA(EFR32 Thread/BLE 동시 운용). btmon: `LE Connection Complete` 직후 `0x3e Connection Failed to be Established` 로 끊김(성공률 ~40~50%, 호스트 bluetoothctl 도 동일, 다른 BLE 기기는 정상). matter.js 0.17.9 는 connect 오류를 재시도하지 않고 noble peripheral 이 'error' 상태로 남아 프로세스 재시작 전까지 재시도 불가.
+   → `host/patches/matterjs-server/NobleBleChannel.js`: upstream main 수정 백포트(connect 오류 → reTryHandler 3회, 'error' 상태 거부 제거). compose 가 컨테이너 파일 위에 bind-mount. **matter.js > 0.17.9 이미지로 올리면 마운트 제거.** (`:dev` 태그 arm64 이미지는 /app 이 비어 있어 사용 불가, stable/latest = 1.4.0)
+   → `agent/src/pairing.js`: 일시적(BLE) 실패만 커미셔닝 재시도(`PAIRING_MAX_ATTEMPTS`, 기본 3). 이벤트/세션에 `attempt`, `maxAttempts`, `lastError`. 실패 1회당 matter.js 탐색 타임아웃 3분(고정).
+2. **커미셔닝 중 BLE 끊김** — `Connection Timeout(0x08)` = 커널 LE supervision timeout 420ms. → `host/ble-conn-params.service`(install.sh 설치) 가 `/sys/kernel/debug/bluetooth/hci0/supervision_timeout` 을 0x00C8(2초) 로. 플러그를 Pi 1m 안으로 옮긴 것도 도움.
+3. **AddNOC InvalidCommand(0x85)** — compose `VENDOR_ID: "0xfff1"` 을 matter-server 1.4.0 이 `parseInt(v,10)` 으로 **0** 으로 파싱 → 패브릭 adminVendorId 0 → 기기가 거부. → `VENDOR_ID: "65521"`(10진수). 저장소가 `server-1-0` → `server-1-fff1` 로 바뀜(새 패브릭; Pi 의 `data/matter/server-1-0` 은 빈 옛 패브릭, 지워도 됨).
+4. **모델 매핑** — GRILLPLATS 는 ep1 On/Off Plug + ep2 Electrical Sensor(0x0510, 클러스터 0x90/0x91/0x9C) 라 빈 SENSOR 가 하나 더 생김 → `siotMapper.js` 가 전력 측정 전용 엔드포인트를 on/off 엔드포인트에 합침(`endpointIds` 비열거 필드로 SSE 갱신 유지). MYGGBETT 배터리는 ep0 PowerSource → 루트 배터리를 기기에 합침. 실측 스냅샷 테스트 `agent/test/siotMapper.test.js`.
+- 테스트: `npm test` 26건 통과(pairing 5, siotMapper 4 추가). CI 워크플로의 "15건" 문구는 수치만 옛것.
+- 기타: 플러그 BLE 랜덤 주소가 재광고마다 바뀌어 noble dbus 프록시가 stale 해지는 로그(`interface not found in proxy object`)는 무해(재발견 후 진행). Pi USB 의 "CX 2.4G Wireless Receiver"(무선 키보드 수신기) 는 2.4GHz 간섭원일 수 있음(미검증). QR 은 사진을 OpenCV `QRCodeDetector` 로 디코드(흐린 사진은 축소+적응 임계값 필요).
 
 ## 6. 바로 다음 할 일
-1. (완료) AC-1 재부팅 복구. Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용). 소스 수정 후 반영: `rsync` 로 `~/matter-gateway-poc` 갱신 → `sudo ./install.sh` 재실행(멱등) 또는 `/opt/matter-gateway` 에서 `docker compose build agent && docker compose up -d`.
-3. 로컬 페이지에서 MYGGBETT / GRILLPLATS 커미셔닝(AC-5). 실패 시 `docker logs matterjs-server` 의 BLE/PASE 단계 확인 → 임베드 백엔드 전환(README "Matter 백엔드 전환").
-4. 이벤트 5초/제어 2초, claim/401, 24시간 안정성 순으로 AC 확인.
-5. 로그: `docker logs gateway-agent`, `docker logs matterjs-server`, `docker exec otbr ot-ctl state`, `~/install2.log`.
+1. (완료) AC-1 재부팅 복구, (완료) AC-5 두 기기 커미셔닝·제어·이벤트. Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용). 소스 수정 후 반영: `rsync` 로 `~/matter-gateway-poc` 갱신 → `sudo ./install.sh` 재실행(멱등) 또는 `/opt/matter-gateway` 에서 `docker compose build agent && docker compose up -d`.
+2. **24시간 안정성(AC)**: 두 기기 붙은 채 하루 두고 `docker logs gateway-agent` 의 재접속/`matterjs-server` 의 세션 오류, 센서 배터리 보고 주기, 재부팅 후 두 기기 복원(`synced 2 nodes`) 확인. 재부팅 후 `ble-conn-params.service` 가 supervision_timeout=200 을 적용하는지(`sudo cat /sys/kernel/debug/bluetooth/hci0/supervision_timeout`) 확인.
+3. claim 흐름 실측(플랫폼팀 또는 curl 로 `POST /siot-app/api/v1/claim`) 과 플랫폼 페어링 화면 연동.
+4. matterjs-server 가 matter.js > 0.17.9 로 올라오면 `host/patches` bind-mount 와 `MATTER_IMAGE` 재검토. 추가 기기(IKEA 조명 등)로 멀티 어드민(commissioning-window) 검증.
+5. 로그: `docker logs gateway-agent`, `docker logs matterjs-server`, `docker exec otbr ot-ctl state|neighbor table`, `~/install2.log`. BLE 심층 추적은 `sudo btmon`.
 
 ## 7. 그 다음 단계(우선순위)
 1. 실기기 검증 결과로 코드 수정(예상 지점: matterjs-server 노드 스냅샷 필드, BLE 안정성, 슬리피 장치 구독).
@@ -95,4 +113,4 @@ matter-gateway-poc/
 ## 8. 참고 사실
 - IKEA 두 기기는 Dirigera 없이 타사 컨트롤러에 직접 페어링됨. 센서는 Thread 보더 라우터 필수. GRILLPLATS 는 QR 인식 문제 보고가 있어 11자리 수동 코드 경로도 지원함.
 - 기존 siot-app 계약 참조 파일: `siot-app/lib/{gateway-id,gateway-identity,registration,platform-auth,types,device-mapper,control-map,mdns,relay-agent,system-status}.ts`, `siot-app/app/siot-app/api/v1/*`.
-- VENDOR_ID 0xFFF1 은 테스트용. 상용은 CSA 가입 후 발급 VID 필요.
+- VENDOR_ID 0xFFF1(=65521) 은 테스트용. compose 에는 **10진수**로 적을 것(5b-3 참고). 상용은 CSA 가입 후 발급 VID 필요.

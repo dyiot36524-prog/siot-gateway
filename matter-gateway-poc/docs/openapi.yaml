@@ -106,7 +106,7 @@ paths:
       description: |
         `text/event-stream`. 연결 직후 `: connected`, 25초마다 `: ping`.
         - 기본 메시지(`data:`): `{"type":"device","device":<SiotDevice>}` — 기기 상태 변경
-        - `event: pairing` — `{"sessionId","stage","error","deviceId"}` 페어링 진행
+        - `event: pairing` — `{"sessionId","stage","error","deviceId","attempt?","maxAttempts?"}` 페어링 진행 (commissioning 은 BLE 연결 실패 시 재시도되며 attempt 가 증가)
         - `event: device_removed` — `{"id","deviceId"}`
         EventSource 는 헤더를 못 보내므로 `?token=` 을 사용한다.
       parameters: [ { name: token, in: query, schema: { type: string } } ]
@@ -205,7 +205,9 @@ components:
         deviceId: { type: [string, "null"], description: 내부 기기 id (matter:<nodeId>) }
         devices: { type: array, items: { $ref: "#/components/schemas/SiotDevice" }, description: 완료 시 생성된 SiotDevice 들 }
         error: { type: [string, "null"] }
-        events: { type: array, items: { type: object, properties: { stage: { type: string }, at: { type: integer }, hint: { type: string }, error: { type: string } } } }
+        attempt: { type: [integer, "null"], description: "현재/마지막 커미셔닝 시도 번호 (BLE 연결 실패 시 재시도)" }
+        maxAttempts: { type: [integer, "null"] }
+        events: { type: array, items: { type: object, properties: { stage: { type: string }, at: { type: integer }, hint: { type: string }, error: { type: string }, attempt: { type: integer }, maxAttempts: { type: integer }, lastError: { type: string } } } }
 security:
   - bearer: []
   - tokenQuery: []

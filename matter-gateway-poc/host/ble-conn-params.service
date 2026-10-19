@@ -1,0 +1,15 @@
+# /etc/systemd/system/ble-conn-params.service
+# Pi 5 내장 BT(BCM4345C0) ↔ IKEA(EFR32) BLE 커미셔닝에서 링크가 supervision timeout(커널 기본 420ms) 으로 자주 끊기는 문제 보정.
+# 새 LE 연결의 supervision timeout 을 2초(0x00C8 × 10ms) 로 늘린다. debugfs 값이라 부팅마다 다시 써야 한다.
+[Unit]
+Description=Relax BLE LE connection supervision timeout for Matter commissioning
+After=bluetooth.service sys-kernel-debug.mount
+Requires=bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'for i in $(seq 1 20); do [ -w /sys/kernel/debug/bluetooth/hci0/supervision_timeout ] && break; sleep 1; done; echo 0x00c8 > /sys/kernel/debug/bluetooth/hci0/supervision_timeout'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

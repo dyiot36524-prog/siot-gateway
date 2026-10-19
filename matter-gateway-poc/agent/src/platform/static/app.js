@@ -48,7 +48,7 @@ function renderDevice(d) {
 
 const es = new EventSource('/api/stream');
 es.onmessage = (ev) => { const d = JSON.parse(ev.data); const old = document.getElementById('dev-' + CSS.escape(d.id)); const li = renderDevice(d); if (old) old.replaceWith(li); else $('devices').appendChild(li); };
-es.addEventListener('pairing', (ev) => { const p = JSON.parse(ev.data); $('pairLog').textContent += `${new Date().toLocaleTimeString()} ${p.stage}${p.error ? ' ' + p.error : ''}\n`; $('pairStatus').textContent = p.stage === 'done' ? '페어링 완료' : p.stage === 'failed' ? '페어링 실패' : `진행 중: ${p.stage}`; if (p.stage === 'done') loadDevices(); });
+es.addEventListener('pairing', (ev) => { const p = JSON.parse(ev.data); const att = p.attempt ? ` (시도 ${p.attempt}/${p.maxAttempts})` : ''; $('pairLog').textContent += `${new Date().toLocaleTimeString()} ${p.stage}${att}${p.error ? ' ' + p.error : ''}\n`; $('pairStatus').textContent = p.stage === 'done' ? '페어링 완료' : p.stage === 'failed' ? '페어링 실패' : `진행 중: ${p.stage}${att}`; if (p.stage === 'done') loadDevices(); });
 es.addEventListener('device_removed', () => loadDevices());
 
 loadSystem(); loadDevices(); setInterval(loadSystem, 30000);

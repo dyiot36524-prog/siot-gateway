@@ -20,7 +20,7 @@
   ├─ 진행 표시 (둘 중 하나)
   │    a) GET /siot-app/api/v1/pairing/{sessionId} 를 1초 간격 폴링
   │    b) 이미 열어둔 SSE(events)의 `event: pairing` 수신
-  │       stage: queued → commissioning(최대 2~3분) → interviewing → done | failed
+  │       stage: queued → commissioning(시도당 최대 3분, BLE 연결 실패 시 자동 재시도 최대 3회 → 이벤트에 attempt/maxAttempts) → interviewing → done | failed
   │
   └─ done: session.devices[] 를 기기 목록에 추가 (SiotDevice). failed: session.error 표시 후 재시도 버튼
 ```

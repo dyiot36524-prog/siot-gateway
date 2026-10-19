@@ -89,7 +89,7 @@ MATTER_BACKEND=embedded docker compose --profile embedded up -d --build agent-em
 두 백엔드는 패브릭을 공유하지 않으므로 기기를 다시 페어링해야 한다. 자세한 비교는 `docs/assessment.md`.
 
 ## 알려진 제약 / 다음 단계
-- matterjs-server 는 베타이며 CSA 재인증 전. VENDOR_ID 0xFFF1 은 테스트용.
+- matterjs-server 는 베타이며 CSA 재인증 전. VENDOR_ID 0xFFF1(=65521) 은 테스트용. compose 의 `VENDOR_ID` 는 **10진수**로 적어야 한다(1.4.0 은 `parseInt(v,10)` 이라 `0xfff1` 이 0 이 되어 기기가 AddNOC 를 거부함).
 - 플랫폼·앱의 페어링 화면은 별도 작업(플랫폼팀). 게이트웨이 쪽 API 는 준비됨.
 - Zigbee 는 보류(두 번째 동글 + 어댑터). 이미지 복제 양산·OTA 는 다음 단계.
 - 릴레이 서버는 저장소 밖(Fly.io). 이 저장소에서는 에이전트 쪽만 구현.

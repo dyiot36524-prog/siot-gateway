@@ -5,8 +5,51 @@ import { logger } from './log.js';
 
 const log = logger('pairing');
 
+// BLE 링크 계층에서 간헐적으로 나는 실패. Pi 5 내장 BT(BCM4345C0) ↔ IKEA(EFR32, Thread/BLE 동시 운용) 조합에서
+// LE Create Connection 직후 "Connection Failed to be Established(0x3e)" 로 끊기는 일이 절반 가까이 관측됐다.
+// matter.js 0.17.9 의 NobleBleChannel 은 'disconnect' 이벤트에만 재시도하고 connect 오류에는 재시도하지 않으므로
+// 여기서 커미셔닝 전체를 다시 시도한다. (실패 1회당 matterjs-server 의 탐색 타임아웃 ≈ 3분)
+const TRANSIENT_PATTERNS = [
+  /Error while connecting to peripheral/i,
+  /Failed to connect to peripheral/i,
+  /unexpected state "error"/i,          // 패치 전 matter.js: 실패한 peripheral 이 error 상태로 남음
+  /le-connection-abort-by-local/i,
+  /Connection Failed to be Established/i,
+  /Timeout while (connecting|interviewing|disconnecting)/i,
+  /disconnected while trying to connect/i,
+  /started attempt\(s\) failed, [1-9]\d* discovered/i,   // 장치는 찾았는데 시도가 실패 → 재시도 가치 있음
+  /BLE transport closed|ble-channel-closed/i,            // 커미셔닝 도중 BLE 링크 끊김(supervision timeout 등)
+  /Commission failed: Operation aborted/i,
+];
+// 재시도해도 소용없는 실패: 코드 오류, 장치 미발견, 인증 거부, 잘못된 패스코드
+const PERMANENT_PATTERNS = [
+  /No commissionable device was discovered/i,
+  /invalid (arguments|pairing code|passcode|qr)/i,
+  /Attestation rejected/i,
+  /PASE.*(invalid|mismatch|wrong)/i,
+  /thread dataset not set/i,
+];
+
+export function isTransientCommissionError(err) {
+  const msg = String(err?.message ?? err ?? '');
+  if (PERMANENT_PATTERNS.some((re) => re.test(msg))) return false;
+  return TRANSIENT_PATTERNS.some((re) => re.test(msg));
+}
+
 export class PairingManager extends EventEmitter {
-  constructor(matter, registry) { super(); this.matter = matter; this.registry = registry; this.active = null; }
+  /**
+   * @param {object} matter   Matter 백엔드 (commissionWithCode 등)
+   * @param {import('./model/registry.js').DeviceRegistry} registry
+   * @param {object} [opts]
+   * @param {number} [opts.maxAttempts]   커미셔닝 시도 횟수 (기본 3, env PAIRING_MAX_ATTEMPTS)
+   * @param {number} [opts.retryDelayMs]  재시도 전 대기 (기본 3000)
+   */
+  constructor(matter, registry, opts = {}) {
+    super();
+    this.matter = matter; this.registry = registry; this.active = null;
+    this.maxAttempts = Math.max(1, Number(opts.maxAttempts ?? process.env.PAIRING_MAX_ATTEMPTS ?? 3));
+    this.retryDelayMs = Number(opts.retryDelayMs ?? 3000);
+  }
 
   /** Thread 데이터셋(ot-ctl dataset active -x 결과 hex)을 컨트롤러에 등록. 한 번만 하면 저장됨 */
   async setThreadDataset(datasetHex, networkName) {
@@ -20,6 +63,29 @@ export class PairingManager extends EventEmitter {
     if (info && info.thread_credentials_set === false) throw new Error('thread dataset not set (run: cli dataset <hex>)');
   }
 
+  /** 커미셔닝을 최대 maxAttempts 회 시도. 일시적(BLE 링크) 실패만 재시도하고 진행 이벤트에 attempt 를 싣는다 */
+  async commissionWithRetry(code, progress) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      progress('commissioning', {
+        attempt, maxAttempts: this.maxAttempts,
+        hint: attempt === 1
+          ? '게이트웨이가 BLE 로 장치를 찾고(PASE) 인증 후 Thread 네트워크에 가입시킵니다'
+          : `BLE 연결이 끊겨 다시 시도합니다 (${attempt}/${this.maxAttempts})`,
+        ...(lastError ? { lastError: lastError.message } : {}),
+      });
+      try {
+        return await this.matter.commissionWithCode(code);
+      } catch (err) {
+        lastError = err;
+        if (attempt >= this.maxAttempts || !isTransientCommissionError(err)) throw err;
+        log.warn(`commissioning attempt ${attempt}/${this.maxAttempts} failed (transient): ${err.message}`);
+        if (this.retryDelayMs > 0) await new Promise((r) => setTimeout(r, this.retryDelayMs));
+      }
+    }
+    throw lastError;
+  }
+
   /** @returns {Promise<device>} */
   async start({ sessionId, code, threadDataset, threadNetworkName }) {
     if (this.active) throw new Error(`pairing already running: ${this.active}`);
@@ -28,8 +94,7 @@ export class PairingManager extends EventEmitter {
     try {
       if (threadDataset) { progress('thread_dataset'); await this.setThreadDataset(threadDataset, threadNetworkName); }
       await this.ensureThreadCredentials();
-      progress('commissioning', { hint: '게이트웨이가 BLE 로 장치를 찾고(PASE) 인증 후 Thread 네트워크에 가입시킵니다' });
-      const node = await this.matter.commissionWithCode(code);
+      const node = await this.commissionWithRetry(code, progress);
       progress('interviewing', { nodeId: node?.node_id });
       const device = this.registry.upsertNode(node);
       progress('done', { deviceId: device.id, device });

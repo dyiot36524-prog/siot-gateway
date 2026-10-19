@@ -80,16 +80,17 @@ export class PlatformServer {
     this.sessions.set(sessionId, session);
     const onProgress = (p) => {
       if (p.sessionId !== sessionId) return;
-      session.stage = p.stage; session.events.push({ stage: p.stage, at: p.at, hint: p.hint, error: p.error });
+      session.stage = p.stage; session.events.push({ stage: p.stage, at: p.at, hint: p.hint, error: p.error, ...(p.attempt ? { attempt: p.attempt, maxAttempts: p.maxAttempts, lastError: p.lastError ?? null } : {}) });
+      if (p.attempt) { session.attempt = p.attempt; session.maxAttempts = p.maxAttempts; }
       if (p.stage === 'done') { session.deviceId = p.deviceId; session.devices = toSiotDevices(p.device); for (const d of session.devices) this.broadcastDevice(d); }
       if (p.stage === 'failed') session.error = p.error;
-      this.broadcastEvent('pairing', { sessionId, stage: p.stage, error: p.error ?? null, deviceId: p.deviceId ?? null });
+      this.broadcastEvent('pairing', { sessionId, stage: p.stage, error: p.error ?? null, deviceId: p.deviceId ?? null, ...(p.attempt ? { attempt: p.attempt, maxAttempts: p.maxAttempts } : {}) });
     };
     this.pairing.on('progress', onProgress);
     this.pairing.start({ sessionId, code: session.code }).catch(() => {}).finally(() => this.pairing.off('progress', onProgress));
     return { session };
   }
-  publicSession(s) { return { sessionId: s.sessionId, stage: s.stage, startedAt: s.startedAt, deviceId: s.deviceId, devices: s.devices, error: s.error, events: s.events }; }
+  publicSession(s) { return { sessionId: s.sessionId, stage: s.stage, startedAt: s.startedAt, deviceId: s.deviceId, devices: s.devices, error: s.error, attempt: s.attempt ?? null, maxAttempts: s.maxAttempts ?? null, events: s.events }; }
 
   // ---------- 라우팅 ----------
   async #handle(req, res) {
@@ -224,6 +225,6 @@ function registryHook(server) {
   const push = (d) => { for (const s of toSiotDevices(d)) server.broadcastDevice(s); };
   server.registry.on('device.added', push);
   server.registry.on('device.updated', push);
-  server.registry.on('state', (c) => { const d = server.registry.get(c.deviceId); if (!d) return; for (const s of toSiotDevices(d)) if (parseSiotId(s.id).endpoint === c.endpoint) { s.lastUpdated = new Date(c.at).toISOString(); server.broadcastDevice(s); } });
+  server.registry.on('state', (c) => { const d = server.registry.get(c.deviceId); if (!d) return; for (const s of toSiotDevices(d)) if ((s.endpointIds ?? [parseSiotId(s.id).endpoint]).includes(c.endpoint)) { s.lastUpdated = new Date(c.at).toISOString(); server.broadcastDevice(s); } });
   server.registry.on('device.removed', (id) => server.broadcastEvent('device_removed', { deviceId: id }));
 }

@@ -59,6 +59,7 @@ chown -R "${MATTER_UID:-1000:1000}" data/matter
 log "sysctl / systemd 설정"
 sed "s/eth0/$BACKBONE_IF/g" host/99-matter-thread.conf > /etc/sysctl.d/99-matter-thread.conf
 cp host/ipv6-forwarding-fix.service /etc/systemd/system/ipv6-forwarding-fix.service
+cp host/ble-conn-params.service /etc/systemd/system/ble-conn-params.service   # BLE supervision timeout 2초 (host/ble-conn-params.service 참고)
 sed "s#/opt/matter-gateway#$TARGET#g" host/matter-gateway.service > /etc/systemd/system/matter-gateway.service
 # NetworkManager 가 accept_ra 를 덮어쓰는 문제 보정
 if [ -d /etc/NetworkManager/conf.d ]; then
@@ -70,6 +71,7 @@ fi
 sysctl --system >/dev/null
 systemctl daemon-reload
 systemctl enable ipv6-forwarding-fix.service >/dev/null
+systemctl enable --now ble-conn-params.service >/dev/null || true
 
 # ── 5. ZBT-2 장치 경로 ───────────────────────────────────────────────────
 ZBT2_DEV="${ZBT2_DEV:-}"
