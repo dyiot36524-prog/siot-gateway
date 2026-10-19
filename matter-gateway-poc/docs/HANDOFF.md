@@ -105,7 +105,7 @@ GRILLPLATS(QR `MT:CUO000QV1769DQ3C310`, disc 1671) 와 MYGGBETT(QR `MT:QDKT1CEK0
 |---|---|
 | 플러그 제어 2초 (재측정, ON/OFF 각 10회) | **통과** 20/20. HTTP 응답 중앙값 0.69s, SSE 확정 중앙값 0.72s, 최대 1.17s, 2초 초과 0 |
 | 문열림 이벤트 SSE | **통과**. 재부팅 전 자석 조작 11건, 재부팅 후 에이전트 기동 약 1분 뒤 조작 8건 모두 `/api/stream` 으로 전달 |
-| 재부팅 복원 (AC-1, 기기 붙은 상태, 전원 재투입) | **통과**. 컨테이너 3개 healthy, 에이전트 `synced 2 nodes`(matterjs-server 보다 먼저 떠서 ECONNREFUSED 2회 → 백오프 후 6초 내 동기), matterjs-server 가 저장된 CASE 재개 레코드로 플러그 1초·센서 4초 내 online + 구독 재설정, `Registered Thread credentials from stored`, OTBR `leader` 1초 내, `ble-conn-params.service` Result=success |
+| 재부팅 복원 (AC-1, 기기 붙은 상태, 전원 재투입) | **통과**. 컨테이너 3개 healthy, 에이전트 `synced 2 nodes`(matterjs-server 보다 먼저 떠서 ECONNREFUSED 2회 → 백오프 후 6초 내 동기), matterjs-server 가 저장된 CASE 재개 레코드로 플러그 1초·센서 4초 내 online + 구독 재설정, `Registered Thread credentials from stored`, OTBR `leader` 1초 내, `ble-conn-params.service` Result=success, 재부팅 후 `sudo cat /sys/kernel/debug/bluetooth/hci0/supervision_timeout` = **200** 확인 |
 | 24시간 안정성 | **창 미완료 — 진행 중**. 기준 시작 2026-10-20 01:06 KST(재부팅 후). 01:00~01:15 구간: 에이전트 재접속 0, matterjs-server ERROR 0·세션 오류 0·구독 끊김 0, 컨테이너 재시작 0, 센서 battery 100 유지(센서 구독 max interval 30분 → 배터리는 변화 시 또는 30분 주기로만 보고됨) |
 
 재점검(창이 지난 뒤): `ssh gslt@192.168.0.172 bash -s 24h < scripts/stability-check.sh` — 종료 코드 0 이면 통과, `!!` 줄이 경고 항목.
@@ -114,7 +114,7 @@ GRILLPLATS(QR `MT:CUO000QV1769DQ3C310`, disc 1671) 와 MYGGBETT(QR `MT:QDKT1CEK0
 1. **Pi 5 RTC 배터리 없음 → 부팅 직후 시각 지연.** 커널이 RTC 를 1970 으로 읽고 systemd 가 `/var/lib/systemd/timesync/clock` 의 마지막 저장 시각(01:03:29)으로 올린 뒤, NTP 동기(실시간 01:06:18)까지 약 1.5~2분 뒤처진 채 동작. 그 사이 docker 로그·`lastUpdated` 가 과거 시각으로 찍히고, 동기 순간 시각이 앞으로 점프하면서 matter.js 가 플러그 구독(timeout 1m39s)을 1회 재설정(01:06:34). 제어·이벤트 영향 없음. 24시간 로그를 읽을 때 부팅 직후 구간은 감안할 것. 정확한 타임스탬프가 필요하면 RTC 배터리(Pi 5 공식 RTC battery) 장착.
 2. 재부팅 후 센서(MYGGBETT)가 OTBR 리더가 아니라 **플러그 라우터(0xdc00)의 자식**으로 재부착됨(`ot-ctl eidcache` 에서 두 ML-EID 모두 dc00 경유, `child table` 비어 있음). 이벤트 전달 정상 — 플러그를 빼면 센서가 리더로 재부착해야 하므로 추후 "플러그 제거 시 센서 유지" 도 한 번 확인할 가치 있음.
 3. OTBR 부팅 약 6분 뒤 플러그로 UDP 전송 NoAck 2건(일시적, 이후 없음).
-4. `sudo -n` 은 터미널 탭에서 비밀번호를 입력해 sudo 캐시가 살아 있을 때만 통과. 재부팅 직후 `supervision_timeout` 직접 읽기는 터미널 탭에서 `sudo cat` 필요(서비스 Result=success 로 쓰기 성공은 확인, 직접 읽기 값은 확인 대기).
+4. `sudo -n` 은 터미널 탭에서 비밀번호를 입력해 sudo 캐시가 살아 있을 때만 통과. 재부팅 직후 `supervision_timeout` 직접 읽기는 터미널 탭에서 `sudo cat` 필요(이번 재부팅 후 직접 읽기 = 200 확인).
 
 ## 6. 바로 다음 할 일
 1. (완료) AC-1 재부팅 복구, (완료) AC-5 두 기기 커미셔닝·제어·이벤트. Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용). 소스 수정 후 반영: `rsync` 로 `~/matter-gateway-poc` 갱신 → `sudo ./install.sh` 재실행(멱등) 또는 `/opt/matter-gateway` 에서 `docker compose build agent && docker compose up -d`.
