@@ -1,0 +1,28 @@
+{
+  "t": "cfg",
+  "cfgVersion": 3,
+  "siteId": "site_01JZ8Q0V4Y4W6P1M2N3B5C7D9E",
+  "keys": [
+    {
+      "v": 2,
+      "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    },
+    {
+      "v": 1,
+      "key": "ZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1-f4CBgoM"
+    }
+  ],
+  "peers": [
+    {
+      "gatewayId": "gw_11111111-2222-5333-8444-555555555555",
+      "lan": [
+        "192.168.0.173"
+      ],
+      "mleid": null
+    }
+  ],
+  "rules": {
+    "version": 1,
+    "rules": []
+  }
+}

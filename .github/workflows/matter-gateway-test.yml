@@ -3,10 +3,10 @@ name: "Matter 게이트웨이 테스트"
 
 on:
   pull_request:
-    paths: ["matter-gateway-poc/**", ".github/workflows/matter-gateway-test.yml"]
+    paths: ["matter-gateway-poc/**", "siot-cloud/packages/protocol/**", ".github/workflows/matter-gateway-test.yml"]
   push:
     branches: [main]
-    paths: ["matter-gateway-poc/**", ".github/workflows/matter-gateway-test.yml"]
+    paths: ["matter-gateway-poc/**", "siot-cloud/packages/protocol/**", ".github/workflows/matter-gateway-test.yml"]
   workflow_dispatch:
 
 jobs:

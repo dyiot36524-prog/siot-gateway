@@ -1,0 +1,47 @@
+{
+  "t": "snapshot",
+  "bootId": "0b7d2f3e-8c1a-4e5b-9f6d-2a3c4b5d6e7f",
+  "seq": 41,
+  "keyVersion": 2,
+  "gateway": {
+    "gatewayId": "gw_739f694e-76be-5888-be41-639544c21b5b",
+    "agentVersion": "0.3.0",
+    "matterServerVersion": "0.6.2",
+    "engineOnline": true,
+    "deviceCount": 2,
+    "startedAt": "2026-10-20T00:39:50.000Z",
+    "lastErrorCode": null
+  },
+  "devices": [
+    {
+      "id": "matter:5:1",
+      "name": "GRILLPLATS Plug",
+      "deviceType": "PLUG",
+      "online": true,
+      "data": {
+        "switch": false,
+        "power": 0,
+        "energy": 0
+      },
+      "lastUpdated": "2026-10-20T00:40:00.000Z",
+      "source": "matter",
+      "vendor": "IKEA of Sweden",
+      "model": "GRILLPLATS Plug"
+    },
+    {
+      "id": "matter:6:1",
+      "name": "MYGGBETT",
+      "deviceType": "BINARY_SENSOR",
+      "online": true,
+      "data": {
+        "active": false,
+        "measurement": "door",
+        "battery": 100
+      },
+      "lastUpdated": "2026-10-20T00:41:00.000Z",
+      "source": "matter",
+      "vendor": "IKEA of Sweden",
+      "model": "MYGGBETT"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "t": "evt",
+  "bootId": "0b7d2f3e-8c1a-4e5b-9f6d-2a3c4b5d6e7f",
+  "keyVersion": 1,
+  "at": "2026-10-20T00:42:00.123Z",
+  "seq": 0,
+  "kind": "device",
+  "data": {
+    "devices": [
+      {
+        "id": "matter:6:1",
+        "name": "MYGGBETT",
+        "deviceType": "BINARY_SENSOR",
+        "online": true,
+        "data": {
+          "active": true,
+          "measurement": "door",
+          "battery": 100
+        },
+        "lastUpdated": "2026-10-20T00:41:00.000Z",
+        "source": "matter",
+        "vendor": "IKEA of Sweden",
+        "model": "MYGGBETT"
+      }
+    ]
+  }
+}

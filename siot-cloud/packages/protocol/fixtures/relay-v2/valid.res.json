@@ -1,0 +1,9 @@
+{
+  "t": "res",
+  "id": "r-01",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": "eyJvayI6dHJ1ZX0="
+}

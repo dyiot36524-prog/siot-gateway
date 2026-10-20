@@ -1,0 +1,605 @@
+openapi: 3.1.0
+info:
+  title: 시옷 앱 API
+  version: 1.0.0-draft
+  summary: 기사·거주자·운영자 PWA(apps/web) 전용 API
+  description: |
+    PWA 가 같은 origin 에서 호출하는 내부 API (계획 Step 3a). 파트너 공개 API(`public-v1.yaml`)와 별개 계약이며 호환성을 보장하지 않는다.
+
+    ## 인증
+    `POST /app/v1/auth/login` 이 httpOnly·Secure·SameSite=Lax 쿠키 `siot_session` 을 준다(30일 슬라이딩). 비밀번호는 argon2id.
+    상태를 바꾸는 요청은 `Origin` 이 앱 origin 과 같아야 한다(다르면 403 CSRF_ORIGIN_MISMATCH).
+
+    ## 역할과 403 규칙 (계획 §2 역할 권한)
+    - **operator**: 진단·로그·OTA·경보·조직/키 관리. **기기 제어는 403**, 이벤트 내용(기기 data) 조회 불가.
+    - **installer**: 자기 조직의 **인계 전** 세대는 생성·GW 바인딩·페어링·이름·제어·초기화.
+      **인계 후**(세대 `ownerUserId` 설정)에는 진단만 — `GET /app/v1/gateways/{gatewayId}` 가 `GatewayDiagnostics`
+      (`online, lastSeen, agentVersion, matterServerVersion, deviceCount, lastErrorCode`)만 주고 `data` 키가 없다 — 와 세대 초기화(이사 처리).
+      인계 후 제어·기기 목록·이벤트는 403 HANDED_OVER.
+    - **resident**(owner): 자기 세대 보기·제어·자동화·세대 떠나기.
+    - 다른 조직·다른 세대 자원은 403 FORBIDDEN.
+
+    ## 오류
+    `{"error":{"code":"...","message":"..."}}` (공개 API 와 같은 형식).
+
+    ## 제어
+    `POST /app/v1/devices/{deviceId}/control` 응답은 공개 API 와 같은 `ControlResult`(HTTP 200).
+  license:
+    name: Proprietary
+    url: https://siot.dev/legal/api-terms
+servers:
+  - url: https://siot-cloud.fly.dev
+    description: 운영(PWA 와 같은 origin)
+security:
+  - session: []
+tags:
+  - name: auth
+    description: 로그인·세션
+  - name: sites
+    description: 세대
+  - name: gateways
+    description: 게이트웨이 바인딩·진단
+  - name: pairing
+    description: 기기 페어링 큐
+  - name: devices
+    description: 기기
+  - name: events
+    description: 실시간 이벤트(SSE)
+paths:
+  /app/v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: 로그인
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              additionalProperties: false
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8, maxLength: 256 }
+      responses:
+        "200":
+          description: 로그인됨. `Set-Cookie siot_session=...; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`
+          headers:
+            Set-Cookie:
+              description: 세션 쿠키
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /app/v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: 로그아웃(세션 폐기)
+      responses:
+        "204": { description: 로그아웃됨. 쿠키 삭제 }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /app/v1/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: 현재 사용자
+      responses:
+        "200":
+          description: 사용자
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /app/v1/sites:
+    get:
+      tags: [sites]
+      operationId: listSites
+      summary: 내가 볼 수 있는 세대 목록
+      description: installer 는 자기 조직 세대, resident 는 소유 세대, operator 는 전체(진단용 필드만).
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 세대 페이지
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Site" } }
+                  nextCursor: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [sites]
+      operationId: createSite
+      summary: 세대 생성(installer)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100, example: 101동 1203호 }
+                address: { type: [string, "null"], maxLength: 300 }
+      responses:
+        "201":
+          description: 생성됨
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /app/v1/sites/{siteId}:
+    get:
+      tags: [sites]
+      operationId: getSite
+      summary: 세대 조회
+      parameters:
+        - $ref: "#/components/parameters/SiteId"
+      responses:
+        "200":
+          description: 세대
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /app/v1/gateways/claim:
+    post:
+      tags: [gateways]
+      operationId: claimGateway
+      summary: 게이트웨이 바인딩(installer)
+      description: |
+        라벨 QR(`https://<app>/g/<gatewayId>#<claimSecret>`) 또는 수동 입력(`siot-<shortId>` + 라벨 코드 16자 4-4-4-4).
+        `claimSecret = HMAC-SHA256(LABEL_MASTER_KEY, gatewayId)` 앞 16 hex. 수동 입력의 하이픈은 서버가 제거한다.
+        성공하면 백엔드가 GW 연결로 `bind`(토큰) + `cfg`(세대 키 v1) 를 보내고, GW 는 60초 안에 토큰으로 재접속한다.
+        세대 행을 `FOR UPDATE` 로 잠그고 조직·상태·claim 창을 검사한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClaimRequest" }
+      responses:
+        "200":
+          description: 바인딩됨
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Gateway" }
+        "400":
+          description: 잘못된 요청 또는 claimSecret 불일치(INVALID_CLAIM_SECRET)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: 출고 등록 조직과 다름(GATEWAY_ORG_MISMATCH) 또는 installer 아님/세대 권한 없음(FORBIDDEN)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: |
+            GATEWAY_ALREADY_BOUND — 세대 초기화 전 바인딩된 GW.
+            GATEWAY_NOT_PROVISIONED — 공개키가 출고 등록되지 않은 GW.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              examples:
+                alreadyBound: { value: { error: { code: GATEWAY_ALREADY_BOUND, message: 이미 다른 세대에 연결된 게이트웨이입니다 } } }
+                notProvisioned: { value: { error: { code: GATEWAY_NOT_PROVISIONED, message: 출고 등록되지 않은 게이트웨이입니다 } } }
+        "423":
+          description: 세대/공장 초기화 후 24시간 claim 창 밖(CLAIM_WINDOW_CLOSED). installer·operator 가 창을 다시 열어야 한다
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /app/v1/sites/{siteId}/gateways:
+    get:
+      tags: [gateways]
+      operationId: listSiteGateways
+      summary: 세대의 게이트웨이 목록
+      description: 인계 후 installer 와 operator 에게는 각 항목이 `GatewayDiagnostics` 다.
+      parameters:
+        - $ref: "#/components/parameters/SiteId"
+      responses:
+        "200":
+          description: 게이트웨이 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      oneOf:
+                        - $ref: "#/components/schemas/Gateway"
+                        - $ref: "#/components/schemas/GatewayDiagnostics"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /app/v1/gateways/{gatewayId}:
+    get:
+      tags: [gateways]
+      operationId: getGateway
+      summary: 게이트웨이 조회
+      description: 인계 후 installer·operator 는 `GatewayDiagnostics` 만 받는다(`data` 키 없음, 계획 B4).
+      parameters:
+        - $ref: "#/components/parameters/GatewayIdPath"
+      responses:
+        "200":
+          description: 게이트웨이
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Gateway"
+                  - $ref: "#/components/schemas/GatewayDiagnostics"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /app/v1/gateways/{gatewayId}/pairing:
+    post:
+      tags: [pairing]
+      operationId: enqueuePairing
+      summary: 페어링 요청을 GW 별 큐에 넣는다
+      description: |
+        백엔드가 GW 마다 직렬 큐를 보유하고(GW 2대는 병렬) 차례가 되면 `req POST /siot-app/api/v1/pairing` 을 보낸다.
+        세션은 `pairing_sessions` 에 저장되어 GW 재시작에도 상태가 남는다. 인계 전 installer 또는 resident.
+      parameters:
+        - $ref: "#/components/parameters/GatewayIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              additionalProperties: false
+              properties:
+                code: { type: string, minLength: 8, maxLength: 64, description: "Matter QR(MT:...) 또는 11/21자리 수동 코드" }
+                name: { type: string, maxLength: 100 }
+      responses:
+        "202":
+          description: 큐에 들어감
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pairingSessionId, queuePosition]
+                properties:
+                  pairingSessionId: { $ref: "#/components/schemas/PairingSessionId" }
+                  queuePosition: { type: integer, minimum: 0, description: 0 이면 바로 시작 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /app/v1/pairing/{pairingSessionId}:
+    get:
+      tags: [pairing]
+      operationId: getPairing
+      summary: 페어링 세션 상태
+      parameters:
+        - name: pairingSessionId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/PairingSessionId" }
+      responses:
+        "200":
+          description: 페어링 세션
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PairingSession" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /app/v1/sites/{siteId}/devices:
+    get:
+      tags: [devices]
+      operationId: listSiteDevices
+      summary: 세대의 기기 목록(캐시)
+      description: operator 와 인계 후 installer 는 403.
+      parameters:
+        - $ref: "#/components/parameters/SiteId"
+      responses:
+        "200":
+          description: 기기 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Device" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /app/v1/devices/{deviceId}:
+    patch:
+      tags: [devices]
+      operationId: updateDevice
+      summary: 기기 이름·위치 변경
+      parameters:
+        - $ref: "#/components/parameters/DeviceIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 100 }
+                room: { type: [string, "null"], maxLength: 50 }
+      responses:
+        "200":
+          description: 변경된 기기
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /app/v1/devices/{deviceId}/control:
+    post:
+      tags: [devices]
+      operationId: controlDevice
+      summary: 기기 제어
+      description: operator 와 인계 후 installer 는 403. 응답은 공개 API 와 같은 `ControlResult`.
+      parameters:
+        - $ref: "#/components/parameters/DeviceIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              additionalProperties: false
+              properties:
+                action: { type: string, enum: [ON, OFF, TOGGLE] }
+      responses:
+        "200":
+          description: 제어 결과
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ControlResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /app/v1/sites/{siteId}/events:
+    get:
+      tags: [events]
+      operationId: streamSiteEvents
+      summary: 세대 실시간 이벤트(SSE)
+      description: |
+        `text/event-stream`. 이벤트 이름: `device`(data = Device), `device_removed`(data = {deviceId}),
+        `gateway`(data = Gateway 또는 GatewayDiagnostics), `pairing`(data = PairingSession). 15초마다 `: keepalive` 주석.
+        `Last-Event-ID` 는 지원하지 않는다(재접속 후 목록을 다시 읽는다).
+      parameters:
+        - $ref: "#/components/parameters/SiteId"
+      responses:
+        "200":
+          description: 이벤트 스트림
+          content:
+            text/event-stream:
+              schema: { type: string }
+              example: "event: device\ndata: {\"deviceId\":\"dev_01JZ8Q0V4Y4W6P1M2N3B5C7D9E\",\"online\":true}\n\n"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: siot_session
+      description: httpOnly·Secure·SameSite=Lax 세션 쿠키(30일 슬라이딩)
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    SiteId:
+      name: siteId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/SiteId" }
+    GatewayIdPath:
+      name: gatewayId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/GatewayId" }
+    DeviceIdPath:
+      name: deviceId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/DeviceId" }
+  responses:
+    BadRequest:
+      description: 잘못된 요청(VALIDATION_FAILED)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: 세션 없음·만료 또는 로그인 실패(UNAUTHORIZED, INVALID_CREDENTIALS)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: 역할·조직·인계 규칙 위반(FORBIDDEN, HANDED_OVER, CSRF_ORIGIN_MISMATCH)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: 없음(NOT_FOUND)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: 속도 제한(RATE_LIMITED)
+      headers:
+        Retry-After:
+          description: 다시 시도할 때까지 기다릴 초
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, pattern: "^[A-Z][A-Z0-9_]*$" }
+            message: { type: string }
+    Role:
+      type: string
+      enum: [installer, resident, operator]
+    UserId: { type: string, pattern: "^usr_[0-9A-HJKMNP-TV-Z]{26}$" }
+    OrgId: { type: string, pattern: "^org_[0-9A-HJKMNP-TV-Z]{26}$" }
+    SiteId: { type: string, pattern: "^site_[0-9A-HJKMNP-TV-Z]{26}$" }
+    GatewayId: { type: string, pattern: "^gw_[0-9a-f-]{36}$" }
+    DeviceId: { type: string, pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$" }
+    PairingSessionId: { type: string, pattern: "^pair_[0-9A-HJKMNP-TV-Z]{26}$" }
+    Me:
+      type: object
+      required: [user]
+      properties:
+        user:
+          type: object
+          required: [userId, email, name, role, orgId]
+          properties:
+            userId: { $ref: "#/components/schemas/UserId" }
+            email: { type: string, format: email }
+            name: { type: string }
+            role: { $ref: "#/components/schemas/Role" }
+            orgId: { oneOf: [{ $ref: "#/components/schemas/OrgId" }, { type: "null" }], description: resident 는 null }
+    Site:
+      type: object
+      required: [siteId, name, address, orgId, ownerUserId, handedOver, epoch, gatewayCount, createdAt]
+      properties:
+        siteId: { $ref: "#/components/schemas/SiteId" }
+        name: { type: string }
+        address: { type: [string, "null"] }
+        orgId: { $ref: "#/components/schemas/OrgId" }
+        ownerUserId: { oneOf: [{ $ref: "#/components/schemas/UserId" }, { type: "null" }] }
+        handedOver: { type: boolean, description: ownerUserId 가 설정되면 true }
+        epoch: { type: integer, minimum: 1, description: 세대 초기화마다 증가 }
+        gatewayCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+    ClaimRequest:
+      type: object
+      required: [claimSecret, siteId]
+      additionalProperties: false
+      description: gatewayId 와 shortId 중 정확히 하나.
+      oneOf:
+        - required: [gatewayId]
+        - required: [shortId]
+      properties:
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        shortId: { type: string, pattern: "^(siot-)?[0-9a-f]{8}$", description: "라벨의 siot-<shortId>(gatewayId 앞 8 hex)" }
+        claimSecret: { type: string, pattern: "^[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}$" }
+        siteId: { $ref: "#/components/schemas/SiteId" }
+    GatewayDiagnostics:
+      type: object
+      description: 인계 후 installer·operator 에게 보이는 필드 전부(계획 B4). `data` 키 없음.
+      additionalProperties: false
+      required: [online, lastSeen, agentVersion, matterServerVersion, deviceCount, lastErrorCode]
+      properties:
+        online: { type: boolean }
+        lastSeen: { type: [string, "null"], format: date-time }
+        agentVersion: { type: [string, "null"] }
+        matterServerVersion: { type: [string, "null"] }
+        deviceCount: { type: integer, minimum: 0 }
+        lastErrorCode: { type: [string, "null"] }
+    Gateway:
+      type: object
+      required: [gatewayId, shortId, siteId, status, online, lastSeen, agentVersion, matterServerVersion, deviceCount, lastErrorCode]
+      properties:
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        shortId: { type: string, pattern: "^[0-9a-f]{8}$" }
+        siteId: { oneOf: [{ $ref: "#/components/schemas/SiteId" }, { type: "null" }] }
+        status: { type: string, enum: [unbound, bound, site_reset_pending, factory_reset_pending] }
+        online: { type: boolean }
+        lastSeen: { type: [string, "null"], format: date-time }
+        agentVersion: { type: [string, "null"] }
+        matterServerVersion: { type: [string, "null"] }
+        deviceCount: { type: integer, minimum: 0 }
+        lastErrorCode: { type: [string, "null"] }
+        claimWindowUntil: { type: [string, "null"], format: date-time }
+    PairingSession:
+      type: object
+      required: [pairingSessionId, gatewayId, status, stage, errorCode, error, deviceIds, queuePosition, createdAt, updatedAt]
+      properties:
+        pairingSessionId: { $ref: "#/components/schemas/PairingSessionId" }
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        status: { type: string, enum: [queued, running, done, failed, cancelled] }
+        stage:
+          type: [string, "null"]
+          enum: [queued, thread_dataset, commissioning, interviewing, done, failed, null]
+          description: GW 페어링 단계(relay-v2 evt pairing.stage)
+        errorCode: { type: [string, "null"], description: "classifyCommissionError() 코드. PWA 가 문구로 바꾼다" }
+        error: { type: [string, "null"] }
+        deviceIds: { type: array, items: { $ref: "#/components/schemas/DeviceId" } }
+        queuePosition: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DeviceType:
+      type: string
+      enum: [PLUG, SWITCH, LIGHT, SENSOR, BINARY_SENSOR, COVER, CLIMATE, FAN, LOCK, WEATHER, UNKNOWN]
+    Device:
+      type: object
+      description: public-v1 의 Device 와 같다.
+      required: [deviceId, gatewayId, siteId, name, room, deviceType, online, data, lastUpdated]
+      properties:
+        deviceId: { $ref: "#/components/schemas/DeviceId" }
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        siteId: { $ref: "#/components/schemas/SiteId" }
+        name: { type: string }
+        room: { type: [string, "null"] }
+        deviceType: { $ref: "#/components/schemas/DeviceType" }
+        online: { type: boolean }
+        data:
+          type: object
+          additionalProperties: { type: [string, number, boolean, "null"] }
+        lastUpdated: { type: string, format: date-time }
+        vendor: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+    ControlResult:
+      type: object
+      required: [status, device, latencyMs]
+      properties:
+        status: { type: string, enum: [confirmed, timeout, offline, failed, not_found] }
+        device:
+          oneOf:
+            - $ref: "#/components/schemas/Device"
+            - type: "null"
+        latencyMs: { type: integer, minimum: 0 }
+        reason: { type: string }

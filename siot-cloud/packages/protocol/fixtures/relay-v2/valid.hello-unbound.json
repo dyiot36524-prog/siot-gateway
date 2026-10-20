@@ -1,0 +1,14 @@
+{
+  "t": "hello",
+  "proto": 2,
+  "gatewayId": "gw_739f694e-76be-5888-be41-639544c21b5b",
+  "bootId": "0b7d2f3e-8c1a-4e5b-9f6d-2a3c4b5d6e7f",
+  "agentVersion": "0.3.0",
+  "matterServerVersion": null,
+  "startedAt": "2026-10-20T00:39:50.000Z",
+  "clock": "2026-10-20T00:39:59.512Z",
+  "cfgVersion": 0,
+  "keyVersion": 0,
+  "pubKey": "cOHbNBjBUWdBdetng8VI0TYwMDJUQK-siPCFjkZnjnw",
+  "sig": "ch-2nfcByy345omVdQEIFPPCSPdgDrVb6A2kUmmAV8ohrcRyLVKTzsonXXRXIXj1DJwQ5l0eKgI4ET1oYBtdCQ"
+}

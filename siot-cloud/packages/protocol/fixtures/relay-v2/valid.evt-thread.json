@@ -1,0 +1,11 @@
+{
+  "t": "evt",
+  "bootId": "0b7d2f3e-8c1a-4e5b-9f6d-2a3c4b5d6e7f",
+  "keyVersion": 1,
+  "at": "2026-10-20T00:42:00.123Z",
+  "seq": 46,
+  "kind": "thread",
+  "data": {
+    "state": "joined"
+  }
+}

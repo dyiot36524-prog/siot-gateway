@@ -1,0 +1,11 @@
+{
+  "t": "req",
+  "id": "r-01",
+  "method": "POST",
+  "path": "/siot-app/api/v1/devices/matter:5:1/control",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": "eyJhY3Rpb24iOiJPTiJ9",
+  "timeoutMs": 2500
+}

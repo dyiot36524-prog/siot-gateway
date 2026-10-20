@@ -19,5 +19,9 @@
     "@project-chip/matter.js": "0.17.9",
     "bonjour-service": "^1.4.1",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1"
   }
 }

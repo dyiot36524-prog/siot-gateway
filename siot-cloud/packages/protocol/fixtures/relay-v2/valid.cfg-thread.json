@@ -1,0 +1,26 @@
+{
+  "t": "cfg",
+  "cfgVersion": 4,
+  "siteId": "site_01JZ8Q0V4Y4W6P1M2N3B5C7D9E",
+  "keys": [
+    {
+      "v": 2,
+      "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+    }
+  ],
+  "peers": [],
+  "rules": {
+    "version": 2,
+    "rules": [
+      {
+        "id": "r1",
+        "when": {},
+        "then": {}
+      }
+    ]
+  },
+  "thread": {
+    "mode": "join",
+    "datasetRef": "tn_01JZ8Q0V4Y4W6P1M2N3B5C7D9F"
+  }
+}

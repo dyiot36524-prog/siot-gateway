@@ -1,0 +1,10 @@
+{
+  "t": "req",
+  "id": "r-01",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": "eyJhY3Rpb24iOiJPTiJ9",
+  "timeoutMs": 2500
+}

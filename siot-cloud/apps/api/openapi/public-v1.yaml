@@ -1,0 +1,706 @@
+openapi: 3.1.0
+info:
+  title: 시옷 공개 API
+  version: 1.0.0-draft
+  summary: 파트너(시옷플랫폼 등)용 세대·게이트웨이·기기 조회/제어와 웹훅
+  description: |
+    파트너 서버가 API 키로 호출하는 공개 API v1 (계획 §3 A1).
+
+    ## 인증
+    `Authorization: Bearer <apiKey>`. 키 형식은 `sk_live_` 또는 `sk_test_` + 32자 base62.
+    서버는 SHA-256 해시만 저장하고 앞 12자만 표시한다. 만료 기본 365일(최대 730일), 조직당 활성 키 최대 2개.
+    폐기된 키는 다음 요청부터 `401`. 만료 30일 전 `api_key.expiring` 웹훅을 보낸다.
+    스코프: `devices:read`, `devices:control`, `webhooks:manage` (각 작업의 `x-required-scope`).
+
+    ## 조직 격리
+    다른 조직의 세대·게이트웨이·기기·웹훅은 존재 여부와 관계없이 `403 FORBIDDEN`.
+
+    ## 버전
+    `/v1/` 안에서는 필드 추가만 한다. 깨지는 변경은 `/v2/` 로 하고 v1 은 6개월 유지(`Deprecation`/`Sunset` 헤더).
+    요청에 `Siot-Api-Version` 을 보내면 그 날짜 버전으로 응답하고, 모든 응답에 실제 적용한 `Siot-Api-Version` 이 붙는다.
+
+    ## 속도 제한
+    API 키당 20 req/s(버스트 40), 기기당 제어 5 req/s. 초과하면 `429` + `Retry-After`(초).
+
+    ## 페이지
+    목록은 cursor 페이지다. `limit` 기본 100, 최대 500. 응답의 `nextCursor` 가 `null` 이면 마지막 페이지.
+
+    ## 오류
+    모든 오류 본문은 `{"error":{"code":"...","message":"..."}}`. `code` 는 기계 판독용 대문자 스네이크.
+
+    ## 제어
+    `POST /v1/devices/{deviceId}/control` 은 결과와 관계없이 HTTP `200` + `ControlResult` 다.
+    `status`: `confirmed`(목표값 evt 확인, deadline 3000ms) | `timeout` | `offline`(감지된 미연결, 즉시) | `failed`(+`reason`) | `not_found`.
+    **감지 전 반열림 구간(최대 25초)** 에는 `offline` 대신 `timeout` 이 올 수 있다(하트비트 10s/25s).
+    조회 API 는 캐시 값을 반환하며 게이트웨이가 오프라인이면 기기 `online:false` 다.
+
+    ## 웹훅
+    이벤트 타입은 `device.state_changed`, `device.removed`, `gateway.online`, `gateway.offline`, `api_key.expiring`.
+    요청 헤더 `Siot-Signature: t=<unix초>,v1=<hex(HMAC-SHA256(secret, t + "." + rawBody))>`, 허용 오차 300초.
+    시도당 타임아웃 5초, 2xx 가 아니면 10s, 30s, 2m, 10m, 30m, 1h, 3h, 6h 후 재시도(8회) 뒤 dead-letter.
+    24시간 연속 실패하면 자동 비활성. 수신자는 `eventId` 로 중복 제거한다. 같은 게이트웨이 이벤트의 순서는 `(gatewayId, bootId, seq)`.
+    재접속 replay 로 늦게 전달되는 이벤트는 `replayed: true`. 게이트웨이 재시작으로 유실된 변화는 `source: "resync"` 로 합성된다.
+    백엔드 배포 직후 90초 동안은 `gateway.offline` 을 유예한다(그 안에 재접속하면 보내지 않음).
+  license:
+    name: Proprietary
+    url: https://siot.dev/legal/api-terms
+servers:
+  - url: https://siot-cloud.fly.dev
+    description: 운영
+security:
+  - apiKey: []
+tags:
+  - name: sites
+    description: 세대
+  - name: gateways
+    description: 게이트웨이
+  - name: devices
+    description: 기기 조회·제어
+  - name: webhooks
+    description: 웹훅 구독 관리
+paths:
+  /v1/sites:
+    get:
+      tags: [sites]
+      operationId: listSites
+      summary: 세대 목록
+      x-required-scope: devices:read
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 세대 페이지
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Site" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/sites/{siteId}:
+    get:
+      tags: [sites]
+      operationId: getSite
+      summary: 세대 조회
+      x-required-scope: devices:read
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/SiteId"
+      responses:
+        "200":
+          description: 세대
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/sites/{siteId}/gateways:
+    get:
+      tags: [gateways]
+      operationId: listSiteGateways
+      summary: 세대의 게이트웨이 목록
+      x-required-scope: devices:read
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/SiteId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 게이트웨이 페이지
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Gateway" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/sites/{siteId}/devices:
+    get:
+      tags: [devices]
+      operationId: listSiteDevices
+      summary: 세대의 기기 목록
+      description: 캐시 값을 반환한다. 게이트웨이가 오프라인이면 기기는 `online:false`.
+      x-required-scope: devices:read
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/SiteId"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 기기 페이지
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Device" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/gateways/{gatewayId}:
+    get:
+      tags: [gateways]
+      operationId: getGateway
+      summary: 게이트웨이 조회
+      x-required-scope: devices:read
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/GatewayIdPath"
+      responses:
+        "200":
+          description: 게이트웨이
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Gateway" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/devices/{deviceId}:
+    get:
+      tags: [devices]
+      operationId: getDevice
+      summary: 기기 조회
+      x-required-scope: devices:read
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/DeviceIdPath"
+      responses:
+        "200":
+          description: 기기(캐시 값)
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Device" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/devices/{deviceId}/control:
+    post:
+      tags: [devices]
+      operationId: controlDevice
+      summary: 기기 제어(켜기/끄기/토글)
+      description: |
+        결과는 항상 HTTP 200 + `ControlResult`. 확정은 게이트웨이의 상태 이벤트로만 판정한다(낙관적 응답은 쓰지 않음).
+        제어 전 값이 이미 목표값이면 즉시 `confirmed`. TOGGLE 의 목표값은 요청 직전 값의 반대다.
+      x-required-scope: devices:control
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/DeviceIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ControlRequest" }
+            example: { action: "ON" }
+      responses:
+        "200":
+          description: 제어 결과
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ControlResult" }
+              examples:
+                confirmed:
+                  value:
+                    status: confirmed
+                    latencyMs: 812
+                    device:
+                      deviceId: dev_01JZ8Q0V4Y4W6P1M2N3B5C7D9E
+                      gatewayId: gw_739f694e-76be-5888-be41-639544c21b5b
+                      siteId: site_01JZ8Q0V4Y4W6P1M2N3B5C7D9E
+                      name: 거실 플러그
+                      room: 거실
+                      deviceType: PLUG
+                      online: true
+                      data: { switch: true, power: 3.2 }
+                      lastUpdated: "2026-10-20T00:40:00.000Z"
+                      vendor: IKEA of Sweden
+                      model: GRILLPLATS
+                offline:
+                  value: { status: offline, latencyMs: 4, device: null }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/webhooks:
+    get:
+      tags: [webhooks]
+      operationId: listWebhooks
+      summary: 웹훅 목록
+      x-required-scope: webhooks:manage
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: 웹훅 페이지
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data: { type: array, items: { $ref: "#/components/schemas/Webhook" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    post:
+      tags: [webhooks]
+      operationId: createWebhook
+      summary: 웹훅 등록
+      description: 응답의 `secret` 은 이때 한 번만 보인다.
+      x-required-scope: webhooks:manage
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookCreate" }
+      responses:
+        "201":
+          description: 생성됨
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebhookCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/webhooks/{webhookId}:
+    delete:
+      tags: [webhooks]
+      operationId: deleteWebhook
+      summary: 웹훅 삭제
+      x-required-scope: webhooks:manage
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/WebhookIdPath"
+      responses:
+        "204":
+          description: 삭제됨
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/webhooks/{webhookId}/test:
+    post:
+      tags: [webhooks]
+      operationId: testWebhook
+      summary: 시험 이벤트 전송
+      description: 서명된 `device.state_changed` 시험 이벤트(`data.test=true`)를 큐에 넣는다.
+      x-required-scope: webhooks:manage
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/WebhookIdPath"
+      responses:
+        "202":
+          description: 전송 큐에 들어감
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [eventId]
+                properties:
+                  eventId: { $ref: "#/components/schemas/EventId" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+webhooks:
+  device.state_changed:
+    post:
+      operationId: onDeviceStateChanged
+      summary: 기기 상태 변화
+      tags: [webhooks]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SiotSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceStateChangedEvent" }
+      responses:
+        "200": { description: 수신 확인(2xx 이면 성공) }
+  device.removed:
+    post:
+      operationId: onDeviceRemoved
+      summary: 기기 제거
+      tags: [webhooks]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SiotSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeviceRemovedEvent" }
+      responses:
+        "200": { description: 수신 확인(2xx 이면 성공) }
+  gateway.online:
+    post:
+      operationId: onGatewayOnline
+      summary: 게이트웨이 온라인
+      tags: [webhooks]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SiotSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GatewayStatusEvent" }
+      responses:
+        "200": { description: 수신 확인(2xx 이면 성공) }
+  gateway.offline:
+    post:
+      operationId: onGatewayOffline
+      summary: 게이트웨이 오프라인
+      description: WS 종료 또는 25초 무응답으로 감지된 오프라인. 배포 직후 90초 유예.
+      tags: [webhooks]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SiotSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GatewayStatusEvent" }
+      responses:
+        "200": { description: 수신 확인(2xx 이면 성공) }
+  api_key.expiring:
+    post:
+      operationId: onApiKeyExpiring
+      summary: API 키 만료 30일 전
+      tags: [webhooks]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SiotSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApiKeyExpiringEvent" }
+      responses:
+        "200": { description: 수신 확인(2xx 이면 성공) }
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: "sk_live_<32자 base62> | sk_test_<32자 base62>"
+      description: 조직 API 키. 운영자 CLI `apikey:create` 로 발급한다.
+  headers:
+    SiotApiVersion:
+      description: 응답에 적용된 API 버전
+      schema: { type: string, example: "2026-10-01" }
+    RetryAfter:
+      description: 다시 시도할 때까지 기다릴 초
+      schema: { type: integer, minimum: 1 }
+  parameters:
+    ApiVersion:
+      name: Siot-Api-Version
+      in: header
+      required: false
+      description: 원하는 API 버전(날짜). 없으면 키에 고정된 버전.
+      schema: { type: string, pattern: "^\\d{4}-\\d{2}-\\d{2}$", example: "2026-10-01" }
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: 이전 응답의 `nextCursor`. 불투명 문자열
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    SiteId:
+      name: siteId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/SiteId" }
+    GatewayIdPath:
+      name: gatewayId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/GatewayId" }
+    DeviceIdPath:
+      name: deviceId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/DeviceId" }
+    WebhookIdPath:
+      name: webhookId
+      in: path
+      required: true
+      schema: { $ref: "#/components/schemas/WebhookId" }
+    SiotSignature:
+      name: Siot-Signature
+      in: header
+      required: true
+      description: '`t=<unix초>,v1=<hex(HMAC-SHA256(secret, t + "." + rawBody))>`. 허용 오차 300초.'
+      schema: { type: string, pattern: "^t=\\d+,v1=[0-9a-f]{64}$" }
+  responses:
+    BadRequest:
+      description: 잘못된 요청(VALIDATION_FAILED, INVALID_CURSOR 등)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: 키 없음·형식 오류·만료·폐기(UNAUTHORIZED)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: 다른 조직 자원 또는 스코프 부족(FORBIDDEN, INSUFFICIENT_SCOPE)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: 없음(NOT_FOUND)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: 속도 제한 초과(RATE_LIMITED)
+      headers:
+        Retry-After: { $ref: "#/components/headers/RetryAfter" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, pattern: "^[A-Z][A-Z0-9_]*$", example: FORBIDDEN }
+            message: { type: string, example: 이 자원에 접근할 수 없습니다 }
+    Page:
+      type: object
+      required: [nextCursor]
+      properties:
+        nextCursor: { type: [string, "null"], description: 다음 페이지 cursor. 마지막이면 null }
+    SiteId: { type: string, pattern: "^site_[0-9A-HJKMNP-TV-Z]{26}$", example: site_01JZ8Q0V4Y4W6P1M2N3B5C7D9E }
+    GatewayId: { type: string, pattern: "^gw_[0-9a-f-]{36}$", example: gw_739f694e-76be-5888-be41-639544c21b5b }
+    DeviceId:
+      type: string
+      pattern: "^dev_[0-9A-HJKMNP-TV-Z]{26}$"
+      description: 백엔드가 발급하는 불투명 ID(`dev_`+ULID). 게이트웨이 재페어링 전까지 유지
+      example: dev_01JZ8Q0V4Y4W6P1M2N3B5C7D9E
+    WebhookId: { type: string, pattern: "^wh_[0-9A-HJKMNP-TV-Z]{26}$", example: wh_01JZ8Q0V4Y4W6P1M2N3B5C7D9E }
+    EventId: { type: string, pattern: "^evt_[0-9A-HJKMNP-TV-Z]{26}$", example: evt_01JZ8Q0V4Y4W6P1M2N3B5C7D9E }
+    Site:
+      type: object
+      required: [siteId, name, gatewayCount, createdAt]
+      properties:
+        siteId: { $ref: "#/components/schemas/SiteId" }
+        name: { type: string, example: 101동 1203호 }
+        gatewayCount: { type: integer, minimum: 0 }
+        createdAt: { type: string, format: date-time }
+    Gateway:
+      type: object
+      required: [gatewayId, siteId, online, lastSeenAt, agentVersion, matterServerVersion, deviceCount]
+      properties:
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        siteId: { $ref: "#/components/schemas/SiteId" }
+        online: { type: boolean }
+        lastSeenAt: { type: [string, "null"], format: date-time }
+        agentVersion: { type: [string, "null"] }
+        matterServerVersion: { type: [string, "null"] }
+        deviceCount: { type: integer, minimum: 0 }
+    DeviceType:
+      type: string
+      enum: [PLUG, SWITCH, LIGHT, SENSOR, BINARY_SENSOR, COVER, CLIMATE, FAN, LOCK, WEATHER, UNKNOWN]
+    DeviceData:
+      type: object
+      description: |
+        deviceType 별 정규화 값(packages/protocol/schema/siot-device.json 과 같음).
+        PLUG/SWITCH/FAN: switch(bool), power(W)?, energy(kWh)?, battery?
+        LIGHT: switch, brightness(0-100)?
+        BINARY_SENSOR: active(bool; 문열림=true), measurement("door"|"motion"), battery(%)?, batteryLow?
+        SENSOR: value, unit, measurement, energy?, battery?
+      additionalProperties: { type: [string, number, boolean, "null"] }
+    Device:
+      type: object
+      description: packages/protocol/schema/public-v1-control.json 의 `$defs/Device` 와 같다.
+      required: [deviceId, gatewayId, siteId, name, room, deviceType, online, data, lastUpdated]
+      properties:
+        deviceId: { $ref: "#/components/schemas/DeviceId" }
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        siteId: { $ref: "#/components/schemas/SiteId" }
+        name: { type: string }
+        room: { type: [string, "null"] }
+        deviceType: { $ref: "#/components/schemas/DeviceType" }
+        online: { type: boolean, description: 기기 online 이면서 게이트웨이도 online }
+        data: { $ref: "#/components/schemas/DeviceData" }
+        lastUpdated: { type: string, format: date-time }
+        vendor: { type: [string, "null"] }
+        model: { type: [string, "null"] }
+    ControlRequest:
+      type: object
+      required: [action]
+      additionalProperties: false
+      properties:
+        action: { type: string, enum: [ON, OFF, TOGGLE] }
+    ControlResult:
+      type: object
+      description: packages/protocol/schema/public-v1-control.json 과 같다.
+      required: [status, device, latencyMs]
+      properties:
+        status: { type: string, enum: [confirmed, timeout, offline, failed, not_found] }
+        device:
+          oneOf:
+            - $ref: "#/components/schemas/Device"
+            - type: "null"
+        latencyMs: { type: integer, minimum: 0 }
+        reason: { type: string, description: "failed/timeout 사유 코드(DEVICE_UNREACHABLE, GATEWAY_TIMEOUT 등)" }
+    EventType:
+      type: string
+      enum: [device.state_changed, device.removed, gateway.online, gateway.offline, api_key.expiring]
+    Webhook:
+      type: object
+      required: [webhookId, url, events, createdAt, disabledAt]
+      properties:
+        webhookId: { $ref: "#/components/schemas/WebhookId" }
+        url: { type: string, format: uri, pattern: "^https://" }
+        events: { type: array, minItems: 1, items: { $ref: "#/components/schemas/EventType" } }
+        createdAt: { type: string, format: date-time }
+        disabledAt: { type: [string, "null"], format: date-time, description: 24h 연속 실패로 자동 비활성된 시각 }
+    WebhookCreate:
+      type: object
+      required: [url, events]
+      additionalProperties: false
+      properties:
+        url: { type: string, format: uri, pattern: "^https://" }
+        events: { type: array, minItems: 1, uniqueItems: true, items: { $ref: "#/components/schemas/EventType" } }
+    WebhookCreated:
+      allOf:
+        - $ref: "#/components/schemas/Webhook"
+        - type: object
+          required: [secret]
+          properties:
+            secret: { type: string, description: "서명 비밀(whsec_ + 32자). 이 응답에서만 보인다" }
+    EventEnvelope:
+      type: object
+      required: [eventId, type, createdAt, replayed]
+      properties:
+        eventId: { $ref: "#/components/schemas/EventId" }
+        type: { $ref: "#/components/schemas/EventType" }
+        createdAt: { type: string, format: date-time }
+        replayed: { type: boolean, description: 재접속 replay 로 늦게 전달된 이벤트 }
+    GatewayEventOrder:
+      type: object
+      required: [gatewayId, bootId, seq, siteId, siteEpoch]
+      properties:
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        siteId: { $ref: "#/components/schemas/SiteId" }
+        siteEpoch: { type: integer, minimum: 1, description: 세대 초기화마다 증가. 이벤트가 속한 거주 기간 }
+        bootId: { type: string, format: uuid }
+        seq: { type: integer, minimum: 0 }
+    DeviceStateChangedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - $ref: "#/components/schemas/GatewayEventOrder"
+        - type: object
+          required: [data]
+          properties:
+            type: { const: device.state_changed }
+            data:
+              type: object
+              required: [device, source]
+              properties:
+                device: { $ref: "#/components/schemas/Device" }
+                source: { type: string, enum: [event, resync], description: "resync = 게이트웨이 재시작 후 snapshot 차이로 합성" }
+                at: { type: string, format: date-time, description: 게이트웨이가 변화를 관측한 시각(GW 시계 보정값) }
+    DeviceRemovedEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - $ref: "#/components/schemas/GatewayEventOrder"
+        - type: object
+          required: [data]
+          properties:
+            type: { const: device.removed }
+            data:
+              type: object
+              required: [deviceId]
+              properties:
+                deviceId: { $ref: "#/components/schemas/DeviceId" }
+    GatewayStatusEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [data]
+          properties:
+            type: { type: string, enum: [gateway.online, gateway.offline] }
+            data:
+              type: object
+              required: [gateway]
+              properties:
+                gateway: { $ref: "#/components/schemas/Gateway" }
+    ApiKeyExpiringEvent:
+      allOf:
+        - $ref: "#/components/schemas/EventEnvelope"
+        - type: object
+          required: [data]
+          properties:
+            type: { const: api_key.expiring }
+            data:
+              type: object
+              required: [prefix, expiresAt]
+              properties:
+                prefix: { type: string, description: 키 앞 12자, example: sk_live_a1b2 }
+                expiresAt: { type: string, format: date-time }

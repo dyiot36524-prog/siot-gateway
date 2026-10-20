@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.siot.dev/protocol/siot-device.json",
+  "title": "SiotDevice",
+  "description": "게이트웨이 로컬 표준 기기(엔드포인트 1개 = 1개). matter-gateway-poc/docs/openapi.yaml 의 SiotDevice 를 이관했고 agent/src/platform/siotMapper.js toSiotDevices() 출력과 같다. 클라우드 공개 API 의 Device 는 이 값을 deviceId(dev_+ULID) 로 감싼다(localId = id).",
+  "type": "object",
+  "required": ["id", "name", "deviceType", "online", "data", "lastUpdated"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 3,
+      "description": "<source>:<nodeId>:<endpoint> (게이트웨이 내부 localId)",
+      "examples": ["matter:5:1"]
+    },
+    "name": { "type": "string", "examples": ["GRILLPLATS Plug"] },
+    "deviceType": { "$ref": "#/$defs/DeviceType" },
+    "online": { "type": "boolean" },
+    "data": { "$ref": "#/$defs/DeviceData" },
+    "lastUpdated": { "type": "string", "format": "date-time" },
+    "source": { "type": "string", "description": "추가 필드(무시 가능)", "examples": ["matter"] },
+    "vendor": { "type": ["string", "null"], "examples": ["IKEA of Sweden"] },
+    "model": { "type": ["string", "null"], "examples": ["GRILLPLATS"] }
+  },
+  "$defs": {
+    "DeviceType": {
+      "title": "DeviceType",
+      "type": "string",
+      "enum": ["PLUG", "SWITCH", "LIGHT", "SENSOR", "BINARY_SENSOR", "COVER", "CLIMATE", "FAN", "LOCK", "WEATHER", "UNKNOWN"]
+    },
+    "DeviceData": {
+      "title": "DeviceData",
+      "type": "object",
+      "description": "deviceType 별 정규화 값.\nPLUG/SWITCH/FAN: switch(bool), power(W)?, energy(kWh)?, battery?\nLIGHT: switch, brightness(0-100)?\nBINARY_SENSOR: active(bool; 문열림=true), measurement(\"door\"|\"motion\"), battery(%)?, batteryLow?\nSENSOR: value, unit, measurement, energy?, battery?\nUNKNOWN: state=\"unknown\"",
+      "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+    }
+  }
+}

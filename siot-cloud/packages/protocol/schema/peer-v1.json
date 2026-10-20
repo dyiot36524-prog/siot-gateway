@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.siot.dev/protocol/peer-v1.json",
+  "title": "PeerV1Frame",
+  "description": "같은 세대 게이트웨이 간 PeerLink 프레임(계획 §2 c, C1). 전송: TCP 3443 + TLS-PSK(identity \"<siteId>:<keyVersion>\", PSK = HKDF-SHA256(siteKey, \"siot-peer-v1\")). LAN·Thread ML-EID 두 경로를 동시에 유지하고 이벤트는 살아 있는 모든 경로로 보낸다. 수신자는 (from, bootId, seq) 로 중복 제거. keepalive: LAN 2s/6s, Thread 10s/30s(monotonic). 링크로 오가는 것은 상태 이벤트뿐이다(E-b).",
+  "oneOf": [
+    { "$ref": "#/$defs/Hello" },
+    { "$ref": "#/$defs/Ping" },
+    { "$ref": "#/$defs/Pong" },
+    { "$ref": "#/$defs/Evt" },
+    { "$ref": "#/$defs/Ack" }
+  ],
+  "$defs": {
+    "GatewayId": { "title": "PeerGatewayId", "type": "string", "pattern": "^gw_[0-9a-f-]{36}$" },
+    "BootId": { "title": "PeerBootId", "type": "string", "format": "uuid" },
+    "Hello": {
+      "title": "PeerHelloFrame",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "siteTag", "gatewayId", "bootId", "keyVersion"],
+      "properties": {
+        "t": { "const": "hello" },
+        "siteTag": { "type": "string", "pattern": "^[0-9a-f]{8}$", "description": "HMAC(siteKey, \"site-tag\") 앞 8 hex (mDNS TXT site= 와 같다)" },
+        "gatewayId": { "$ref": "#/$defs/GatewayId" },
+        "bootId": { "$ref": "#/$defs/BootId" },
+        "keyVersion": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "Ping": {
+      "title": "PeerPingFrame",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": { "t": { "const": "ping" } }
+    },
+    "Pong": {
+      "title": "PeerPongFrame",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t"],
+      "properties": { "t": { "const": "pong" } }
+    },
+    "Evt": {
+      "title": "PeerEvtFrame",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["t", "from", "bootId", "seq", "kind", "data"],
+      "properties": {
+        "t": { "const": "evt" },
+        "from": { "$ref": "#/$defs/GatewayId" },
+        "bootId": { "$ref": "#/$defs/BootId" },
+        "seq": { "type": "integer", "minimum": 1 },
+        "kind": { "enum": ["device", "device_removed", "gateway"] },
+        "data": { "type": "object" }
+      }
+    },
+    "Ack": {
+      "title": "PeerAckFrame",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "bootId 는 확인하는 상대(evt 송신자)의 bootId, upTo 이하 seq 를 받았다는 뜻",
+      "required": ["t", "bootId", "upTo"],
+      "properties": {
+        "t": { "const": "ack" },
+        "bootId": { "$ref": "#/$defs/BootId" },
+        "upTo": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

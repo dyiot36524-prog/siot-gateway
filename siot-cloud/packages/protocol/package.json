@@ -1,0 +1,30 @@
+{
+  "name": "@siot/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "시옷 클라우드·게이트웨이 공용 계약: relay-v2, peer-v1, siot-device, public-v1 control JSON Schema 와 생성 TS 타입",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./schema/*.json": "./schema/*.json",
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": ["schema", "src", "fixtures"],
+  "scripts": {
+    "gen": "node scripts/gen.mjs",
+    "gen:check": "node scripts/gen.mjs --check",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "json-schema-to-typescript": "^15.0.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "t": "snapshot",
+  "bootId": "0b7d2f3e-8c1a-4e5b-9f6d-2a3c4b5d6e7f",
+  "seq": 0,
+  "keyVersion": 0,
+  "gateway": {
+    "gatewayId": "gw_739f694e-76be-5888-be41-639544c21b5b",
+    "agentVersion": "0.3.0",
+    "engineOnline": false,
+    "deviceCount": 0
+  },
+  "devices": []
+}

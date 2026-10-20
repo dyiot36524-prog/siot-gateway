@@ -1,0 +1,8 @@
+{
+  "t": "req",
+  "id": "r-02",
+  "method": "GET",
+  "path": "/siot-app/api/v1/devices",
+  "headers": {},
+  "body": ""
+}
