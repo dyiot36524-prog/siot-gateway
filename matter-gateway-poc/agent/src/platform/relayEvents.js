@@ -29,5 +29,6 @@ export function wireRelayEvents({ registry, pairing, publish }) {
     sessionId: p.sessionId, stage: p.stage,
     ...(p.errorCode ? { errorCode: p.errorCode } : {}), ...(p.error ? { error: p.error } : {}),
     ...(p.deviceId ? { deviceId: p.deviceId } : {}), ...(p.device ? { devices: toSiotDevices(p.device) } : {}),
+    ...(Number.isInteger(p.attempt) ? { attempt: p.attempt } : {}), ...(Number.isInteger(p.maxAttempts) ? { maxAttempts: p.maxAttempts } : {}),
   }));
 }

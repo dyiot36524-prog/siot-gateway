@@ -63,7 +63,7 @@ close 코드 처리(GW):
 |---|---|---|
 | `device` | `{devices:[SiotDevice, …]}` (1개 이상) | registry `device.added/updated`, 속성 변화(`state`, 해당 endpoint 의 SiotDevice 만) |
 | `device_removed` | `{deviceId:"matter:<node>", ids:[SiotDevice.id, …]}` | registry `device.removed` (알려진 SiotDevice 가 없으면 보내지 않음) |
-| `pairing` | `{sessionId, stage, errorCode?, error?, deviceId?, devices?}` | 페어링 진행. `errorCode` 는 openapi `PairingErrorCode` |
+| `pairing` | `{sessionId, stage, errorCode?, error?, deviceId?, devices?, attempt?, maxAttempts?}` | 페어링 진행. `errorCode` 는 openapi `PairingErrorCode`, `attempt`/`maxAttempts` 는 commissioning 재시도 번호 |
 | `gateway` | 자유 객체(`engineOnline`, `deviceCount`, …) | Matter 백엔드 연결/해제·동기화 |
 | `thread` | 자유 객체(`datasetRegistered`, `bytes`) | OTBR 데이터셋 자동 등록 |
 | `error` | 자유 객체(`source`, `message`) | Matter 백엔드 첫 접속 실패, unhandledRejection |

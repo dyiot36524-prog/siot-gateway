@@ -1,0 +1,93 @@
+name: siot-cloud
+
+# 시옷 클라우드(siot-cloud/): typecheck · vitest(Postgres service) · redocly lint · web build. nightly e2e 는 뼈대.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'siot-cloud/**'
+      - 'matter-gateway-poc/agent/src/**'
+      - '.github/workflows/siot-cloud.yml'
+  pull_request:
+    paths:
+      - 'siot-cloud/**'
+      - 'matter-gateway-poc/agent/src/**'
+      - '.github/workflows/siot-cloud.yml'
+  schedule:
+    - cron: '0 18 * * *' # 매일 03:00 KST
+  workflow_dispatch:
+
+concurrency:
+  group: siot-cloud-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: siot-cloud
+
+jobs:
+  check:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: siot_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # Step 1 통합 테스트(test/step1) DB
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/siot_test
+      # Step 2 릴레이 테스트(test/relay)는 이 서버에 siot_relay_test·siot_relay_e2e 를 만든다
+      RELAY_TEST_PG: postgres://postgres:postgres@localhost:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: siot-cloud/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: protocol 생성 타입 최신 여부
+        run: npm -w packages/protocol run gen:check
+      - name: typecheck
+        run: npm run -ws --if-present typecheck
+      - name: OpenAPI lint (redocly, 오류 0)
+        run: npm -w apps/api run lint:openapi
+      - name: 마이그레이션(빈 DB, B1)
+        run: |
+          PGPASSWORD=postgres createdb -h localhost -U postgres siot_migrate_check
+          DATABASE_URL=postgres://postgres:postgres@localhost:5432/siot_migrate_check npm -w apps/api run db:migrate
+      - name: vitest
+        run: npm run -ws --if-present test
+      - name: web build
+        run: npm -w apps/web run build
+
+  e2e-nightly:
+    # A3 시연 e2e(시뮬 GW 2 + partner-sim) 뼈대. 시뮬 GW 컨테이너와 스테이징 배포가 준비되면 채운다.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: siot-cloud/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: e2e (TODO — 스테이징 + 시뮬 GW)
+        run: |
+          echo "nightly e2e skeleton: SIOT_API=$SIOT_API 가 설정되면 tools/partner-sim demo 를 돌린다"
+          if [ -n "${SIOT_API:-}" ]; then npm run demo:partner -w tools/partner-sim; fi
+        env:
+          SIOT_API: ${{ vars.SIOT_STAGING_API }}
+          SIOT_API_KEY: ${{ secrets.SIOT_STAGING_API_KEY }}

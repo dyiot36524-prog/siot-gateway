@@ -1,0 +1,12 @@
+{
+  "name": "@siot/partner-sim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "파트너 웹훅 수신 시뮬레이터(서명 검증·지연 로그·처음 N회 500·큰 글씨 화면) + A3 시연 스크립트",
+  "scripts": {
+    "start": "tsx server.ts",
+    "demo:partner": "tsx demo.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

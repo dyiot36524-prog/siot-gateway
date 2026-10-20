@@ -1,0 +1,11 @@
+{
+  "name": "@siot/slo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SLO 측정 스크립트(C3 ①② 제어 100회·같은 명령 10회)",
+  "scripts": {
+    "control-100": "tsx control-100.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

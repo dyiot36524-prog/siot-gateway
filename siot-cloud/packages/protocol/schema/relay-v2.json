@@ -830,6 +830,16 @@
               "items": {
                 "$ref": "siot-device.json"
               }
+            },
+            "attempt": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "commissioning 시도 번호(1부터). stage=commissioning 일 때"
+            },
+            "maxAttempts": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "commissioning 최대 시도 횟수(PAIRING_MAX_ATTEMPTS)"
             }
           }
         },

@@ -10,6 +10,9 @@ siot-cloud/
     openapi/           public-v1.yaml(파트너), app-v1.yaml(PWA)
     drizzle/           SQL 마이그레이션(커밋 대상)
   apps/web/            @siot/web — Vite + React + vite-plugin-pwa
+  tools/partner-sim/   파트너 웹훅 수신 시뮬레이터(server.ts) + A3 시연(demo.ts)
+  tools/slo/           C3 ①② 제어 100회 측정(control-100.ts)
+  docs/ops/            배포·백업(PITR/wal-g)·복원 리허설·업타임 기록
 ```
 
 ## 명령
@@ -20,13 +23,17 @@ npm run -ws --if-present typecheck
 npm run -ws --if-present test
 npm -w apps/api run lint:openapi          # redocly lint, 오류 0
 npm -w apps/web run build
+npm -w apps/api run admin -- org:create --name 시옷플랫폼   # 운영자 CLI(src/admin/cli.ts)
+PORT=8787 SECRET=whsec_… FAIL_FIRST=2 npm start -w tools/partner-sim
+SIOT_API_KEY=sk_… PARTNER_SIM=http://localhost:8787 npm run demo:partner -w tools/partner-sim   # A3
+SIOT_API_KEY=sk_… DEVICE_ID=dev_… npm run control-100 -w tools/slo                              # C3 ①②
 npm run gen                               # schema/*.json → packages/protocol/src/generated/*.d.ts (결과 커밋)
 npm -w packages/protocol run gen:check    # 생성본이 낡았으면 실패
 npm -w apps/api run db:generate           # src/db/schema.ts → drizzle/*.sql
 DATABASE_URL=postgres://... npm -w apps/api run db:migrate
 ```
 
-`@siot/protocol` 은 빌드 없이 TS 소스(`src/index.ts`)를 export 한다. api 는 `tsx` 로 실행하고, Dockerfile(Step 1)에서 번들하거나 tsx 로 띄운다.
+`@siot/protocol` 은 빌드 없이 TS 소스(`src/index.ts`)를 export 한다. api 는 `tsx` 로 실행한다. **배포도 번들 없이 tsx 로 띄운다**(Step 1 결정: `Dockerfile` 3단계 — 전체 의존성으로 PWA 빌드 → `npm ci --omit=dev -w apps/api -w packages/protocol` → `node --import tsx src/server.ts`. 그래서 `tsx` 는 `@siot/api` 의 dependencies). 배포·백업·복원 절차는 `docs/ops/`.
 
 ## 계약 (P0 고정)
 
@@ -53,6 +60,26 @@ Ajv 로 검증할 때: `Ajv2020({strict:true, allowUnionTypes:true})` + `ajv-for
 
 ID 형식: `org_`, `usr_`, `site_`, `dev_`, `evt_`, `wh_`, `pair_` + ULID(Crockford 26자). `gatewayId` 는 GW 가 정한 `gw_<uuid>`, `shortId` 는 그 앞 8 hex.
 
+## Step 1 백엔드 구성 (apps/api/src)
+
+| 모듈 | 내용 |
+|---|---|
+| `app.ts` | 조립 순서: metrics → webhooks(outbox·worker·alerts) → cache → `registerRelay(app, {db, config, cache, outbox, metrics, alerts, deployedAt})` → auth → public → appapi(+ `registerGatewayClaim`) → PWA 정적(apps/web/dist). 테스트는 `buildApp({bus})` 로 fake GatewayBus 를 넣는다 |
+| `auth/` | `apiKey.ts`(sk_live_/sk_test_+32 base62, SHA-256, 앞 12자, 365/730일, 조직당 활성 2개, 매 요청 DB 확인 → 폐기 즉시 401), `session.ts`(argon2id, `siot_session` httpOnly·SameSite=Lax·https 면 Secure, 30일 슬라이딩), `roles.ts`(siteAccess full/diagnostics/none, operator 제어 403, 인계 후 installer `HANDED_OVER`), `rateLimit.ts`(인메모리 토큰 버킷), `secretBox.ts`(relay/crypto 와 같은 `v1.` AES-256-GCM 포맷) |
+| `cache/` | `PgStateCache`: 인메모리 + write-through(gateways·devices·events, 웹훅 outbox 같은 트랜잭션). GW 별 직렬화. replay 규칙·resync 합성(sub=1..k)·keyVersion→epoch. 재기동 직후 전 GW offline. `StateCache` 에 `resolveDevice/getGateway/getSiteGateways/reloadGateway/updateDeviceMeta/subscribeEvents` 추가 |
+| `public/` | public-v1 전 엔드포인트, `ControlCoordinator`(N1, deadline 3,000ms, 기기당 5 req/s), 키당 20 req/s·버스트 40, `Siot-Api-Version` |
+| `appapi/` | app-v1 auth/me/sites/devices/control/events(SSE)/pairing 큐(`PairingQueue`, GW 별 직렬·GW 간 병렬). CSRF Origin 훅. gateways 조회·claim 은 `gateways.ts`(Step 2) |
+| `webhooks/` | `Outbox.ts`(`enqueue(orgId, event, tx?)` — relay 의 gateway.online/offline 입력도 받음, 같은 상태 연속 억제), `worker.ts`(즉시 1차, 10s…6h 8회 후 dead, 24h 연속 실패 자동 비활성+경보, api_key.expiring), `sign.ts`, `alerts.ts`(Slack 호환, 30분 중복 억제) |
+| `metrics/` | 앱별 prom-client 레지스트리. relay 가 `relayReconnects/heartbeatTimeouts/gatewaysOnline/relayRequests` 를 갱신 |
+| `admin/` | `npm run admin --` 의 `org:create`, `user:create`, `apikey:create`, `apikey:revoke`, `gateway:provision`, `gateway:claim-window`, `gateway:transfer-org` (audit_log 기록) |
+
+공통: `src/ids.ts`(ID 생성·패턴), `src/http.ts`(오류 형식·cursor 페이지·FastifyRequest 확장).
+
+### 테스트 DB
+
+- Step 1 통합 테스트(`apps/api/test/step1/*.int.test.ts`)는 로컬 Homebrew Postgres 의 **`siot_test`** DB 를 쓴다(`TEST_DATABASE_URL` 로 바꿀 수 있음). 없으면 만들고 마이그레이션한 뒤 파일마다 truncate 한다. 파일 사이 직렬화는 advisory lock. 테스트 후 DB 는 지우지 않고 남겨 둔다.
+- Step 2 릴레이 테스트는 `siot_relay_test`·`siot_relay_e2e`(`RELAY_TEST_PG`).
+
 ## 소유권 (다음 단계 병렬 실행자용)
 
 | 실행자 | 소유(수정 가능) | 규칙 |
@@ -69,3 +96,7 @@ ID 형식: `org_`, `usr_`, `site_`, `dev_`, `evt_`, `wh_`, `pair_` + ULID(Crockf
 | 날짜 | 파일 | 변경 | 작성 |
 |---|---|---|---|
 | 2026-10-20 | protocol 전체, openapi 2종, db/schema.ts, drizzle/0000_m1_init.sql | P0 최초 작성. §2 b 표 대비 추가: `snapshot.keyVersion`(replay 규칙의 epoch 귀속에 필요), `evt device_removed.data.ids` | P0 |
+| 2026-10-21 | packages/protocol/schema/relay-v2.json (+ generated/relay-v2.d.ts) | `EvtPairing.data` 에 선택 필드 `attempt`, `maxAttempts`(정수 ≥1, commissioning 재시도 번호) 추가. 에이전트 `relayEvents.js` 가 싣는다 | Step 2 백엔드 |
+| 2026-10-21 | apps/api/package.json | `ajv`·`ajv-formats` 를 dependencies 로 이동(릴레이가 런타임에 relay-v2 프레임을 양방향 검증) | Step 2 백엔드 |
+| 2026-10-21 | apps/api/openapi/public-v1.yaml | 응답 코드 추가: `400`(ID 형식·Siot-Api-Version 형식) → sites/{siteId}·gateways/{id}·devices/{id}·webhooks/{id}(DELETE·test), `403`(INSUFFICIENT_SCOPE) → GET /v1/sites·GET/POST /v1/webhooks. 설명에 조직 격리 404 규칙(제거된 자기 기기·삭제된 웹훅·세대 미소속 GW)과 지원 버전 `2026-10-01` 명시 | Step 1 |
+| 2026-10-21 | package.json(workspaces), apps/api/package.json | workspaces 에 `tools/partner-sim`·`tools/slo` 추가. `tsx` 를 dependencies 로 이동(배포 이미지가 tsx 로 실행), `admin` 스크립트 추가 | Step 1 |

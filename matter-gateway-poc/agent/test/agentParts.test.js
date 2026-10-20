@@ -129,6 +129,8 @@ test('registry + pairing events become device / device_removed / pairing evt fra
   assert.equal(failed.data.errorCode, 'DEVICE_NOT_FOUND');
   const done = evts.find((e) => e.kind === 'pairing' && e.data.stage === 'done');
   assert.equal(done.data.devices[0].id, 'matter:3:1');
+  const commissioning = evts.find((e) => e.kind === 'pairing' && e.data.stage === 'commissioning');
+  assert.equal(commissioning.data.attempt, 1); assert.equal(commissioning.data.maxAttempts, 1);
   const doorEvt = evts.filter((e) => e.kind === 'device').at(-1);
   assert.ok(doorEvt.data.devices.length >= 1);
   registry.removeNode(99);   // 모르는 노드 제거는 evt 없음(ids 필수)

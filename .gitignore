@@ -26,3 +26,7 @@ siot-app-mobile/
 
 # 시옷 릴레이 서버 (별도 배포 — Fly.io)
 siot-relay/
+
+# ── 시옷 클라우드(siot-cloud) ─────────────
+siot-cloud/**/.env
+siot-cloud/**/dist/

@@ -302,6 +302,14 @@ export interface EvtPairingFrame {
     error?: string | null;
     deviceId?: string | null;
     devices?: SiotDevice[];
+    /**
+     * commissioning 시도 번호(1부터). stage=commissioning 일 때
+     */
+    attempt?: number;
+    /**
+     * commissioning 최대 시도 횟수(PAIRING_MAX_ATTEMPTS)
+     */
+    maxAttempts?: number;
   };
   /**
    * 링버퍼 재전송분이면 true(재전송일 때만 포함). seq ≤ 직전 snapshot.seq 이면 백엔드는 캐시에 반영하지 않는다.

@@ -8,7 +8,9 @@
   "workspaces": [
     "packages/protocol",
     "apps/api",
-    "apps/web"
+    "apps/web",
+    "tools/partner-sim",
+    "tools/slo"
   ],
   "scripts": {
     "typecheck": "npm run -ws --if-present typecheck",
