@@ -1,8 +1,12 @@
-// 플랫폼/로컬 HTTP API 서버 — siot-app 의 라우트 계약을 그대로 제공한다.
-//  플랫폼용(인증):  /siot-app/api/v1/{gateway, devices, devices/:id, devices/:id/control, events(SSE), system,
-//                   pairing(POST), pairing/:sessionId(GET), devices/:id(DELETE), devices/:id/commissioning-window(POST)}
-//  플랫폼용(무인증): POST /siot-app/api/v1/claim
-//  로컬 UI용(무인증, LAN): /api/{gateway, register(POST), system, devices, devices/:id/control, stream(SSE), pairing(POST/GET :id)}, GET /
+// 플랫폼/로컬 HTTP API 서버 — siot-app 의 라우트 계약을 제공한다. 모드별 서버 구성(openapi 2.0):
+//  출고(production, 기본)
+//    LAN 0.0.0.0:3000      GET /healthz, GET /api/gateway {gatewayId, shortId, bound, version, pubKey}, 상태 페이지(/). 나머지 404
+//    loopback 127.0.0.1:3001  /siot-app/api/v1/{gateway, devices, devices/:id, devices/:id/control, events(SSE), system,
+//                          pairing(POST), pairing/:sessionId(GET), devices/:id(DELETE), devices/:id/commissioning-window(POST)}
+//                          — Authorization: Bearer 필수(쿼리 토큰 401). claim/register 없음(바인딩은 릴레이 bind 프레임).
+//                          릴레이 req 는 이 포트로 프록시된다.
+//  dev(SIOT_MODE=dev)      기존 단일 서버(:3000): 위 v1 API(+ ?token=), 무인증 POST /siot-app/api/v1/claim(토큰 있으면 409),
+//                          로컬 UI용 무인증 /api/{gateway, register(POST), system, devices, devices/:id/control, stream(SSE), pairing}
 import http from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -16,6 +20,7 @@ import { logger } from '../log.js';
 const log = logger('api');
 const STARTED_AT = new Date().toISOString();
 const STATIC_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'static');
+const V1 = '/siot-app/api/v1/';
 
 export class PlatformServer {
   /**
@@ -26,22 +31,43 @@ export class PlatformServer {
    * @param {(cmd:object)=>Promise<any>} d.execute
    * @param {import('../pairing.js').PairingManager} d.pairing
    * @param {object} d.matter   backend (serverInfo 등)
-   * @param {object} [d.opts]   { port, version, engineKind }
+   * @param {object} [d.opts]   { mode:'production'|'dev', port, adminPort, lanHost, version, engineKind }
    */
   constructor(d) {
     Object.assign(this, d);
+    this.mode = d.opts?.mode === 'dev' ? 'dev' : 'production';
     this.port = d.opts?.port ?? 3000;
+    this.adminPort = d.opts?.adminPort ?? 3001;
+    this.lanHost = d.opts?.lanHost ?? '0.0.0.0';
     this.version = d.opts?.version ?? '0.2.0';
     this.engineKind = d.opts?.engineKind ?? 'matter';
     this.sse = new Set();            // {res, kind:'platform'|'local'}
     this.sessions = new Map();       // pairing sessionId -> session
     this.lastUpdated = new Map();    // siotId -> ISO
-    this.server = http.createServer((req, res) => this.#handle(req, res).catch((e) => { log.error('handler', e.stack ?? e.message); this.#json(res, 500, { ok: false, error: '알 수 없는 오류', detail: String(e.message) }); }));
+    const wrap = (h) => (req, res) => h(req, res).catch((e) => { log.error('handler', e.stack ?? e.message); this.#json(res, 500, { ok: false, error: '알 수 없는 오류', detail: String(e.message) }); });
+    if (this.mode === 'dev') {
+      this.server = http.createServer(wrap((q, r) => this.#handleDev(q, r)));
+      this.adminServer = null;
+    } else {
+      this.server = http.createServer(wrap((q, r) => this.#handleLan(q, r)));        // LAN 0.0.0.0:3000
+      this.adminServer = http.createServer(wrap((q, r) => this.#handleAdmin(q, r)));  // 127.0.0.1:3001
+    }
     registryHook(this);
   }
 
-  listen() { return new Promise((r) => this.server.listen(this.port, '0.0.0.0', () => { log.info(`listening on :${this.port}`); r(); })); }
-  close() { for (const c of this.sse) try { c.res.end(); } catch {} return new Promise((r) => this.server.close(() => r())); }
+  async listen() {
+    await new Promise((r) => this.server.listen(this.port, this.lanHost, r));
+    log.info(`[${this.mode}] listening on ${this.lanHost}:${this.server.address().port}`);
+    if (this.adminServer) {
+      await new Promise((r) => this.adminServer.listen(this.adminPort, '127.0.0.1', r));   // loopback 전용(LAN 에서 연결 거부)
+      log.info(`[${this.mode}] local admin API on 127.0.0.1:${this.adminServer.address().port}`);
+    }
+  }
+  close() {
+    for (const c of this.sse) try { c.res.end(); } catch {}
+    const closeOne = (srv) => new Promise((r) => (srv?.listening ? srv.close(() => r()) : r()));
+    return Promise.all([closeOne(this.server), closeOne(this.adminServer)]).then(() => {});
+  }
 
   // ---------- 디바이스 뷰 ----------
   listSiotDevices() {
@@ -76,44 +102,78 @@ export class PlatformServer {
   startPairing(code) {
     if (this.pairing.active) return { error: '다른 페어링이 진행 중입니다.', status: 409 };
     const sessionId = randomUUID();
-    const session = { sessionId, code: String(code).trim(), stage: 'queued', startedAt: new Date().toISOString(), events: [], deviceId: null, devices: [], error: null };
+    const session = { sessionId, code: String(code).trim(), stage: 'queued', startedAt: new Date().toISOString(), events: [], deviceId: null, devices: [], error: null, errorCode: null };
     this.sessions.set(sessionId, session);
     const onProgress = (p) => {
       if (p.sessionId !== sessionId) return;
-      session.stage = p.stage; session.events.push({ stage: p.stage, at: p.at, hint: p.hint, error: p.error, ...(p.attempt ? { attempt: p.attempt, maxAttempts: p.maxAttempts, lastError: p.lastError ?? null } : {}) });
+      session.stage = p.stage; session.events.push({ stage: p.stage, at: p.at, hint: p.hint, error: p.error, ...(p.errorCode ? { errorCode: p.errorCode } : {}), ...(p.attempt ? { attempt: p.attempt, maxAttempts: p.maxAttempts, lastError: p.lastError ?? null, lastErrorCode: p.lastErrorCode ?? null } : {}) });
       if (p.attempt) { session.attempt = p.attempt; session.maxAttempts = p.maxAttempts; }
       if (p.stage === 'done') { session.deviceId = p.deviceId; session.devices = toSiotDevices(p.device); for (const d of session.devices) this.broadcastDevice(d); }
-      if (p.stage === 'failed') session.error = p.error;
-      this.broadcastEvent('pairing', { sessionId, stage: p.stage, error: p.error ?? null, deviceId: p.deviceId ?? null, ...(p.attempt ? { attempt: p.attempt, maxAttempts: p.maxAttempts } : {}) });
+      if (p.stage === 'failed') { session.error = p.error; session.errorCode = p.errorCode ?? 'UNKNOWN'; }
+      this.broadcastEvent('pairing', { sessionId, stage: p.stage, error: p.error ?? null, errorCode: p.errorCode ?? null, deviceId: p.deviceId ?? null, ...(p.attempt ? { attempt: p.attempt, maxAttempts: p.maxAttempts } : {}) });
     };
     this.pairing.on('progress', onProgress);
     this.pairing.start({ sessionId, code: session.code }).catch(() => {}).finally(() => this.pairing.off('progress', onProgress));
     return { session };
   }
-  publicSession(s) { return { sessionId: s.sessionId, stage: s.stage, startedAt: s.startedAt, deviceId: s.deviceId, devices: s.devices, error: s.error, attempt: s.attempt ?? null, maxAttempts: s.maxAttempts ?? null, events: s.events }; }
+  publicSession(s) { return { sessionId: s.sessionId, stage: s.stage, startedAt: s.startedAt, deviceId: s.deviceId, devices: s.devices, error: s.error, errorCode: s.errorCode ?? null, attempt: s.attempt ?? null, maxAttempts: s.maxAttempts ?? null, events: s.events }; }
+
+  /** 축소 게이트웨이 정보(출고 LAN). 토큰·코드 등 비밀 없음 */
+  async publicGateway() {
+    const s = await this.store.load();
+    const gatewayId = await this.identity.gatewayId();
+    const pubKey = this.identity.deviceKey ? (await this.identity.deviceKey()).publicKey : null;
+    return { ok: true, gatewayId, shortId: gatewayId.slice(3, 11), bound: Boolean(s.gatewayToken), version: this.version, pubKey };
+  }
 
   // ---------- 라우팅 ----------
-  async #handle(req, res) {
+  #route(req) {
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
     const p = url.pathname.replace(/\/+$/, '') || '/';
-    const m = req.method;
-    log.debug(`${m} ${p}`);
+    log.debug(`${req.method} ${p}`);
+    return { url, p, m: req.method };
+  }
+
+  /** 출고 LAN(0.0.0.0:3000): 상태 확인만 */
+  async #handleLan(req, res) {
+    const { p, m } = this.#route(req);
+    if (m === 'GET' && p === '/healthz') return this.#json(res, 200, { ok: true });
+    if (m === 'GET' && p === '/api/gateway') return this.#json(res, 200, await this.publicGateway());
+    if (m === 'GET' && (p === '/' || p === '/index.html')) return this.#static(res, 'status.html', 'text/html; charset=utf-8');
+    if (m === 'GET' && p === '/status.js') return this.#static(res, 'status.js', 'text/javascript; charset=utf-8');
+    return this.#json(res, 404, { ok: false, error: 'not found' });
+  }
+
+  /** 출고 loopback(127.0.0.1:3001): 전체 v1 API, Bearer 헤더 필수 */
+  async #handleAdmin(req, res) {
+    const { url, p, m } = this.#route(req);
+    if (m === 'GET' && p === '/healthz') return this.#json(res, 200, { ok: true });
+    if (p.startsWith(V1) && p !== V1 + 'claim') {
+      const auth = await verifyPlatformAuth(req, url, this.store, { allowQuery: false });
+      if (!auth.ok) return this.#json(res, 401, { ok: false, error: auth.error });
+      return this.#api(p.slice(V1.length), m, req, res, url, 'platform');
+    }
+    return this.#json(res, 404, { ok: false, error: 'not found' });
+  }
+
+  /** dev(SIOT_MODE=dev): 기존 단일 서버 동작 */
+  async #handleDev(req, res) {
+    const { url, p, m } = this.#route(req);
 
     // --- 무인증: claim ---
-    if (p === '/siot-app/api/v1/claim' && m === 'POST') return this.#claim(req, res);
+    if (p === V1 + 'claim' && m === 'POST') return this.#claim(req, res);
 
-    // --- 플랫폼 API (인증) ---
-    if (p.startsWith('/siot-app/api/v1/')) {
-      const auth = await verifyPlatformAuth(req, url, this.store);
+    // --- 플랫폼 API (인증, ?token= 허용) ---
+    if (p.startsWith(V1)) {
+      const auth = await verifyPlatformAuth(req, url, this.store, { allowQuery: true });
       if (!auth.ok) return this.#json(res, 401, { ok: false, error: auth.error });
-      const sub = p.slice('/siot-app/api/v1/'.length);
-      return this.#api(sub, m, req, res, url, 'platform');
+      return this.#api(p.slice(V1.length), m, req, res, url, 'platform');
     }
     // --- 로컬 API (무인증, LAN) ---
     if (p.startsWith('/api/')) {
       const sub = p.slice('/api/'.length);
       if (sub === 'register' && m === 'POST') return this.#register(res);
-      if (sub === 'gateway' && m === 'GET') { const s = await this.store.load(); return this.#json(res, 200, { ok: true, gatewayId: await this.identity.gatewayId(), registered: Boolean(s.gatewayToken), hasCode: Boolean(s.registrationCode), registrationCode: s.registrationCode ?? null, codeExpiresAt: s.codeExpiresAt ?? null }); }
+      if (sub === 'gateway' && m === 'GET') { const s = await this.store.load(); return this.#json(res, 200, { ...(await this.publicGateway()), registered: Boolean(s.gatewayToken), hasCode: Boolean(s.registrationCode), registrationCode: s.registrationCode ?? null, codeExpiresAt: s.codeExpiresAt ?? null }); }
       return this.#api(sub, m, req, res, url, 'local');
     }
     if (p === '/' || p === '/connect' || p === '/index.html') return this.#static(res, 'index.html', 'text/html; charset=utf-8');
@@ -128,6 +188,7 @@ export class PlatformServer {
     if (sub === 'system' && m === 'GET') return this.#json(res, 200, { ok: true, ...(await this.systemStatus()) });
     if (sub === 'devices' && m === 'GET') { const devices = this.listSiotDevices(); return this.#json(res, 200, kind === 'platform' ? { ok: true, gatewayId, count: devices.length, devices } : { ok: true, count: devices.length, devices }); }
     if ((sub === 'events' || sub === 'stream') && m === 'GET') return this.#sse(req, res, kind);
+    if (sub === 'sim/door' && m === 'POST' && this.matter?.isSim) return this.#json(res, 200, { ok: true, ...this.matter.toggleDoor() });
     if (sub === 'pairing' && m === 'GET') return this.#json(res, 200, { ok: true, supported: ['MATTER'], active: this.pairing.active, sessions: [...this.sessions.values()].slice(-10).map((s) => this.publicSession(s)) });
     if (sub === 'pairing' && m === 'POST') {
       const body = await this.#body(req);
@@ -181,6 +242,7 @@ export class PlatformServer {
     if (!body) return this.#json(res, 400, { ok: false, error: 'JSON 본문이 필요합니다.' });
     if (typeof body.registrationCode !== 'string') return this.#json(res, 400, { ok: false, error: 'registrationCode(문자열)가 필요합니다.' });
     const s = await this.store.load(); const nowIso = new Date().toISOString();
+    if (s.gatewayToken) return this.#json(res, 409, { ok: false, error: '이미 등록된 게이트웨이입니다.' });
     const valid = isCodeValid(s.registrationCode ?? null, s.codeExpiresAt ?? null, nowIso) && s.registrationCode === body.registrationCode;
     if (!valid) return this.#json(res, 400, { ok: false, error: '유효하지 않거나 만료된 등록 코드입니다.' });
     const token = randomBytes(32).toString('hex');

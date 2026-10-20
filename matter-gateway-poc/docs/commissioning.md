@@ -13,7 +13,7 @@
 ## 실제 흐름 (우리 게이트웨이 기준)
 ```
 앱: QR 스캔 → "MT:Y.K90..." 코드 전송
-          ↓ (클라우드 MQTT  gw/<id>/pairing/start)
+          ↓ (클라우드 MQTT  gw/<id>/pairing/start)  ※ WebSocket 릴레이로 대체: relay-v2 req POST /siot-app/api/v1/pairing (docs/relay-protocol.md)
 게이트웨이: 1) BLE 로 광고 중인 기기 발견
            2) 셋업 코드로 PASE 세션
            3) 인증서 검사(DCL/PAA 루트, 인터넷 필요)

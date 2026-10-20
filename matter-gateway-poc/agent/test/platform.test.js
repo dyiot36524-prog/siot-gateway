@@ -1,10 +1,10 @@
-// 플랫폼 API 계약 테스트 — siot-app 의 응답 형태와 claim/인증 흐름을 가짜 Matter 백엔드로 검증
+// 플랫폼 API 계약 테스트 — siot-app 의 응답 형태와 claim/인증 흐름을 가짜 Matter 백엔드로 검증.
+// SIOT_MODE=dev(기존 단일 서버) 고정. 출고 모드는 production.test.js
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { EventEmitter } from 'node:events';
 import { GatewayStore } from '../src/platform/store.js';
 import { Identity, uuidv5, deriveGatewayId, shouldReprovision, SIOT_NAMESPACE } from '../src/platform/identity.js';
 import { PlatformServer } from '../src/platform/server.js';
@@ -12,18 +12,10 @@ import { DeviceRegistry } from '../src/model/registry.js';
 import { PairingManager } from '../src/pairing.js';
 import { toSiotDevices, resolveAction, parseSiotId } from '../src/platform/siotMapper.js';
 import { isCodeValid } from '../src/platform/registration.js';
+import { MatterSim, SIM_PLUG, SIM_DOOR } from '../src/matterSim.js';
 
-const plugNode = { node_id: 1, available: true, attributes: { '0/40/1': 'IKEA of Sweden', '0/40/3': 'GRILLPLATS', '1/29/0': [{ deviceType: 266, revision: 3 }], '1/6/0': false, '1/144/8': 12500 } };
-const sensorNode = { node_id: 2, available: true, attributes: { '0/40/1': 'IKEA of Sweden', '0/40/3': 'MYGGBETT', '1/29/0': [{ deviceType: 21, revision: 1 }], '1/69/0': true, '1/47/12': 180 } };
-
-class FakeMatter extends EventEmitter {
-  constructor() { super(); this.serverInfo = { backend: 'fake', thread_credentials_set: true, bluetooth_enabled: true }; this.commands = []; }
-  async deviceCommand(nodeId, ep, cl, name, payload) { this.commands.push({ nodeId, ep, cl, name, payload }); if (cl === 6) this.emit('attribute_updated', [nodeId, `${ep}/6/0`, name === 'On']); return null; }
-  async commissionWithCode(code) { if (code === 'MT:FAIL') throw new Error('no device found'); return { ...sensorNode, node_id: 3 }; }
-  async setThreadDataset() { return true; }
-  async openCommissioningWindow(nodeId, timeout) { return { setup_manual_code: '34970112332', setup_qr_code: 'MT:TEST', timeout }; }
-  async removeNode() { return true; }
-}
+const plugNode = SIM_PLUG;
+const sensorNode = SIM_DOOR;
 
 let dir, server, base, store, matter, registry;
 before(async () => {
@@ -33,10 +25,10 @@ before(async () => {
   store = new GatewayStore(dir);
   const identity = new Identity(store);
   registry = new DeviceRegistry();
-  matter = new FakeMatter();
+  matter = new MatterSim();
   const pairing = new PairingManager(matter, registry);
   const execute = async (cmd) => { const d = registry.get(cmd.deviceId); await matter.deviceCommand(d.nodeId, cmd.endpoint, 6, cmd.action === 'on' ? 'On' : cmd.action === 'off' ? 'Off' : 'Toggle', {}); };
-  server = new PlatformServer({ store, identity, registry, execute, pairing, matter, opts: { port: 0, version: '9.9.9' } });
+  server = new PlatformServer({ store, identity, registry, execute, pairing, matter, opts: { mode: 'dev', port: 0, version: '9.9.9' } });
   await new Promise((r) => server.server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.server.address().port}`;
   registry.upsertNode(plugNode); registry.upsertNode(sensorNode);
@@ -86,8 +78,8 @@ test('local register → platform claim → token works (Bearer and ?token=)', a
   r = await j('/siot-app/api/v1/claim', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ registrationCode: code }) });
   assert.equal(r.status, 200); assert.equal(r.body.ok, true); assert.equal(r.body.gatewayId, process.env.SIOT_GATEWAY_ID); assert.match(r.body.gatewayToken, /^[0-9a-f]{64}$/);
   token = r.body.gatewayToken;
-  // 코드 재사용 불가
-  r = await j('/siot-app/api/v1/claim', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ registrationCode: code }) }); assert.equal(r.status, 400);
+  // 토큰이 이미 있으면 재claim 불가(409) — 코드 재사용도 여기서 막힌다
+  r = await j('/siot-app/api/v1/claim', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ registrationCode: code }) }); assert.equal(r.status, 409); assert.equal(r.body.ok, false);
   r = await j('/siot-app/api/v1/gateway', { headers: { authorization: `Bearer ${token}` } });
   assert.equal(r.status, 200); assert.equal(r.body.apiVersion, 'v1'); assert.equal(r.body.engine.kind, 'matter'); assert.equal(r.body.version, '9.9.9');
   r = await j(`/siot-app/api/v1/system?token=${token}`); assert.equal(r.status, 200); assert.equal(r.body.registered, true); assert.equal(r.body.deviceCount, 2); assert.ok(r.body.startedAt);
@@ -132,7 +124,7 @@ test('pairing session via platform API and local API, commissioning window, remo
   r = await j('/api/pairing', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: 'MT:FAIL' }) });
   assert.equal(r.status, 202);
   for (let i = 0; i < 50; i++) { r = await j(`/api/pairing/${r.body.session.sessionId}`); if (['done', 'failed'].includes(r.body.session.stage)) break; await new Promise((x) => setTimeout(x, 20)); }
-  assert.equal(r.body.session.stage, 'failed'); assert.match(r.body.session.error, /no device/);
+  assert.equal(r.body.session.stage, 'failed'); assert.match(r.body.session.error, /no device/); assert.equal(r.body.session.errorCode, 'DEVICE_NOT_FOUND');
   r = await j('/siot-app/api/v1/devices/matter:3:1/commissioning-window', { method: 'POST', headers: h, body: '{}' });
   assert.equal(r.status, 200); assert.equal(r.body.setup_manual_code, '34970112332');
   r = await j('/siot-app/api/v1/devices/matter:3:1', { method: 'DELETE', headers: h }); assert.equal(r.status, 200);

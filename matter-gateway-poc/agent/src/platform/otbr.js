@@ -16,7 +16,7 @@ export async function fetchState(restUrl) {
 }
 
 /** 데이터셋이 등록될 때까지 주기적으로 시도. 등록되면 true */
-export function startDatasetSync({ restUrl, matter, pairing, intervalMs = 15000 }) {
+export function startDatasetSync({ restUrl, matter, pairing, intervalMs = 15000, onRegistered }) {
   let timer = null, done = false;
   const tick = async () => {
     try {
@@ -26,6 +26,7 @@ export function startDatasetSync({ restUrl, matter, pairing, intervalMs = 15000 
       await pairing.setThreadDataset(hex);
       log.info(`Thread dataset registered from OTBR (${hex.length / 2} bytes)`);
       done = true;
+      onRegistered?.(hex.length / 2);
     } catch (e) { log.debug(`dataset sync: ${e.message}`); }
     finally { if (!done) timer = setTimeout(tick, intervalMs); }
   };

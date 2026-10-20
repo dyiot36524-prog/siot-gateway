@@ -66,6 +66,7 @@
 }
 ```
 클라우드는 `gw/<id>/rules/set` 로 규칙 전체를 내려보내고, 게이트웨이는 data/rules.json 에 저장해 오프라인에서도 실행한다.
+> 2026-10 갱신: MQTT 토픽은 **WebSocket 릴레이로 대체**되었다. 규칙은 relay-v2 `cfg.rules {version, rules[]}` 로 내려오고 `cfg_ack.rulesVersion` 으로 확인한다(`docs/relay-protocol.md`). M1 에이전트는 cfg 를 `data/agent/site.json` 에 저장·ack 만 하고, 규칙 엔진 반영은 Step 5 에서 붙인다. 로컬 규칙 파일은 `/app/data/rules.json`.
 
 ## 다음 단계
 - Zigbee 소스: zigpy 또는 Zigbee2MQTT → 같은 capability 로 매핑하는 어댑터 추가 (id 접두어 `zigbee:`)

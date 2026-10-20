@@ -1,4 +1,6 @@
 # /etc/systemd/system/matter-gateway.service — 부팅 시 docker compose 자동 기동 (install.sh 가 설치)
+# 인터넷 없이 부팅해도 기동되어야 한다: 부팅 때 pull 하지 않고(이미지는 digest 고정), 없는 이미지만 받는다.
+# 정지는 stop(컨테이너 보존) — down 은 컨테이너를 지워 다음 부팅에 이미지·네트워크 재생성이 필요해진다.
 [Unit]
 Description=Siot Matter/Thread gateway (docker compose)
 Requires=docker.service
@@ -9,9 +11,8 @@ Wants=network-online.target
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/matter-gateway
-ExecStartPre=/usr/bin/docker compose pull --ignore-buildable --quiet
-ExecStart=/usr/bin/docker compose up -d --remove-orphans
-ExecStop=/usr/bin/docker compose down
+ExecStart=/usr/bin/docker compose up -d --pull missing --remove-orphans
+ExecStop=/usr/bin/docker compose stop
 TimeoutStartSec=600
 
 [Install]

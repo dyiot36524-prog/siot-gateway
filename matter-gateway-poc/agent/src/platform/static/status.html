@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시옷 Matter 게이트웨이</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --fg:#1a1d21; --muted:#6b7280; --ok:#16a34a; --bad:#dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f1115; --card:#181b21; --fg:#e8eaed; --muted:#9aa0a6; } }
+  body { margin:0; font-family: system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:560px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:8px 0 16px; } h2 { font-size:16px; margin:0 0 8px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+  dl { display:grid; grid-template-columns:max-content 1fr; gap:6px 12px; margin:0; font-size:14px; }
+  dt { color:var(--muted); } dd { margin:0; word-break:break-all; }
+  .short { font-family: ui-monospace, monospace; font-size:24px; letter-spacing:2px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .muted { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>시옷 Matter 게이트웨이 <span id="ver" class="muted"></span></h1>
+  <section class="card">
+    <h2>상태</h2>
+    <dl>
+      <dt>에이전트</dt><dd id="health">확인 중…</dd>
+      <dt>라벨 코드</dt><dd class="short" id="short">-</dd>
+      <dt>ID</dt><dd id="gid">-</dd>
+      <dt>세대 연결</dt><dd id="bound">-</dd>
+    </dl>
+  </section>
+  <p class="muted">등록·기기 페어링·제어는 설치 기사 앱에서 합니다. 이 페이지는 상태 확인용입니다.</p>
+</main>
+<script src="/status.js"></script>
+</body>
+</html>

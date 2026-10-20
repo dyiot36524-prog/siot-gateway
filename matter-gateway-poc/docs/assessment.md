@@ -32,6 +32,7 @@
 1. otbr: ZBT-2(RCP, 460800) + 백본 인터페이스 eth0/wlan0. Thread 네트워크 생성, 데이터셋 보관.
 2. matterjs-server(또는 자사 matter.js 컨트롤러): host network, BLE는 `NOBLE_BINDINGS=dbus`, fabric 데이터 볼륨, VENDOR_ID.
 3. gateway-agent(자사): matter 서버 WS 구독(start_listening) → 자사 디바이스 모델로 정규화 → MQTT over TLS(게이트웨이별 mTLS 인증서)로 플랫폼 연결, 페어링 세션 API, 로컬 클레임(QR/mDNS), OTA.
+   > 2026-10 갱신: 플랫폼 연결은 MQTT 대신 **WebSocket 릴레이(relay-v2)로 대체**되었다. `docs/relay-protocol.md` 참고.
 
 플랫폼/앱
 - 게이트웨이 레지스트리 + 클레임 플로우(박스 QR → 앱 → 클라우드 → 게이트웨이 토큰 교환)

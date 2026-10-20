@@ -36,6 +36,32 @@ export function isTransientCommissionError(err) {
   return TRANSIENT_PATTERNS.some((re) => re.test(msg));
 }
 
+// 페어링 실패 분류(계획 E2). 앱/PWA 는 이 코드로 한국어 문구와 재시도 버튼을 고른다.
+//   CODE_INVALID 코드 오류 · DEVICE_NOT_FOUND 기기 안 잡힘 · THREAD_NOT_READY Thread 미설정 · ATTESTATION_REJECTED 인증 거부
+//   BLE_TRANSIENT BLE 일시 실패(시도 단위) · UNKNOWN 기타
+// 최종 실패(세션 failed)에서는 재시도를 다 쓴 BLE_TRANSIENT 를 DEVICE_NOT_FOUND 로 보고한다(finalErrorCode).
+export const PAIRING_ERROR_CODES = Object.freeze(['CODE_INVALID', 'DEVICE_NOT_FOUND', 'THREAD_NOT_READY', 'ATTESTATION_REJECTED', 'BLE_TRANSIENT', 'UNKNOWN']);
+const CLASSIFIERS = [
+  ['THREAD_NOT_READY', [/thread dataset not set/i, /thread credentials? (not set|missing)/i]],
+  ['ATTESTATION_REJECTED', [/Attestation rejected/i, /attestation (failed|verification)/i]],
+  ['CODE_INVALID', [/invalid (arguments|pairing code|passcode|qr|setup code|manual code)/i, /PASE.*(invalid|mismatch|wrong)/i, /(unable to|failed to|cannot) (parse|decode).*(code|qr|payload)/i]],
+  ['DEVICE_NOT_FOUND', [/No commissionable device was discovered/i, /no device found/i, /started attempt\(s\) failed, 0 discovered/i]],
+  ['BLE_TRANSIENT', TRANSIENT_PATTERNS],
+];
+
+/** @returns {'CODE_INVALID'|'DEVICE_NOT_FOUND'|'THREAD_NOT_READY'|'ATTESTATION_REJECTED'|'BLE_TRANSIENT'|'UNKNOWN'} */
+export function classifyCommissionError(err) {
+  const msg = String(err?.message ?? err ?? '');
+  for (const [code, patterns] of CLASSIFIERS) if (patterns.some((re) => re.test(msg))) return code;
+  return 'UNKNOWN';
+}
+
+/** 세션 최종 실패 코드: BLE 재시도 소진은 "기기 안 잡힘" */
+export function finalErrorCode(err) {
+  const c = classifyCommissionError(err);
+  return c === 'BLE_TRANSIENT' ? 'DEVICE_NOT_FOUND' : c;
+}
+
 export class PairingManager extends EventEmitter {
   /**
    * @param {object} matter   Matter 백엔드 (commissionWithCode 등)
@@ -72,7 +98,7 @@ export class PairingManager extends EventEmitter {
         hint: attempt === 1
           ? '게이트웨이가 BLE 로 장치를 찾고(PASE) 인증 후 Thread 네트워크에 가입시킵니다'
           : `BLE 연결이 끊겨 다시 시도합니다 (${attempt}/${this.maxAttempts})`,
-        ...(lastError ? { lastError: lastError.message } : {}),
+        ...(lastError ? { lastError: lastError.message, lastErrorCode: classifyCommissionError(lastError) } : {}),
       });
       try {
         return await this.matter.commissionWithCode(code);
@@ -100,7 +126,7 @@ export class PairingManager extends EventEmitter {
       progress('done', { deviceId: device.id, device });
       return device;
     } catch (err) {
-      progress('failed', { error: err.message });
+      progress('failed', { error: err.message, errorCode: finalErrorCode(err) });
       throw err;
     } finally {
       this.active = null;

@@ -1,5 +1,6 @@
 // MATTER_BACKEND=server  → matterjs-server WebSocket (기본, 선택지 B)
 // MATTER_BACKEND=embedded → matter.js 라이브러리 직접 임베드 (선택지 C)
+// MATTER_BACKEND=sim      → 가짜 백엔드(실기기 없음). SIM_DOOR_TOGGLE_MS 로 도어 이벤트 생성
 import { config } from './config.js';
 import { logger } from './log.js';
 
@@ -7,6 +8,11 @@ const log = logger('backend');
 
 export async function createMatterBackend() {
   const kind = process.env.MATTER_BACKEND ?? 'server';
+  if (kind === 'sim') {
+    const { MatterSim } = await import('./matterSim.js');
+    log.info('using simulated matter backend');
+    return new MatterSim({ doorToggleMs: Number(process.env.SIM_DOOR_TOGGLE_MS ?? 0) });
+  }
   if (kind === 'embedded') {
     const { MatterEmbedded } = await import('./embedded/matterEmbedded.js');
     log.info('using embedded matter.js controller');

@@ -1,32 +1,62 @@
 openapi: 3.1.0
 info:
-  title: 시옷 게이트웨이 플랫폼 API
-  version: "1.1"
+  title: 시옷 게이트웨이 로컬 API
+  version: "2.0"
   description: |
-    시옷플랫폼/앱 → 게이트웨이 호출 계약. 기존 siot-app(HA 애드온)과 동일한 v1 계약에
-    Matter 페어링 관련 엔드포인트(pairing, commissioning-window, 기기 삭제)가 추가되었다.
+    시옷 클라우드(릴레이 req 프록시)/설치 도구 → 게이트웨이 에이전트 로컬 API 계약.
+    클라우드 공개 API(/v1)와는 별개 계약이다. 릴레이 프레임은 docs/relay-protocol.md.
 
-    인증: `Authorization: Bearer <gatewayToken>` 또는 `?token=<gatewayToken>` (SSE/EventSource 용).
-    토큰은 `POST /siot-app/api/v1/claim` 으로 1회 발급된다.
+    ## 2.0 — 깨지는 변경(breaking, 보안 예외 3건 + 포트 분리 + errorCode)
+    출고 모드(`SIOT_MODE=production`, 기본)에서 다음이 바뀐다. `SIOT_MODE=dev` 는 1.1 동작을 그대로 유지한다.
+    1. **`?token=` 제거** — 쿼리 토큰은 `401`. `Authorization: Bearer <gatewayToken>` 만 받는다(SSE 포함).
+    2. **비인증 claim/register 제거** — `POST /siot-app/api/v1/claim`, `POST /api/register` 는 `404`.
+       바인딩은 클라우드가 릴레이 `bind` 프레임으로 토큰을 내려준다. dev 모드 claim 은 토큰이 이미 있으면 `409`.
+    3. **비인증 pairing·제어·삭제 제거** — LAN 의 `/api/{devices, pairing, stream, system, ...}` 는 `404`.
+    4. **포트 분리** — LAN `0.0.0.0:3000` 은 `GET /healthz`, `GET /api/gateway`(축소), 상태 페이지(`/`)만.
+       전체 `/siot-app/api/v1/*` 는 **`127.0.0.1:3001`(loopback) 전용**이며 LAN 에서는 연결 거부.
+       릴레이 req 는 에이전트가 자기 토큰을 넣어 3001 로 프록시한다(dev 는 3000).
+    5. **`errorCode`** — 페어링 세션·이벤트에 실패 분류 코드 추가(`PairingErrorCode`).
 
-    접근 경로: LAN 에서는 mDNS `_siot._tcp` 로 발견한 `http://siot-<shortId>.local:3000`,
-    외부에서는 릴레이 서버가 같은 경로/헤더/본문을 그대로 전달한다.
+    인증: `Authorization: Bearer <gatewayToken>` (dev 모드만 `?token=` 도 허용).
 servers:
+  - url: http://127.0.0.1:3001
+    description: 출고 모드 전체 API (loopback 전용 — 릴레이 프록시/게이트웨이 셸에서만)
   - url: http://siot-{shortId}.local:3000
+    description: 출고 모드 LAN(healthz·축소 gateway) / dev 모드 단일 서버
     variables: { shortId: { default: "xxxxxxxx", description: "gatewayId 의 gw_ 뒤 8자" } }
 tags:
-  - { name: claim, description: 게이트웨이 등록 }
+  - { name: lan, description: "LAN 3000 (출고 모드에서 유일하게 열린 경로)" }
+  - { name: claim, description: "게이트웨이 등록 (dev 모드 전용)" }
   - { name: gateway, description: 게이트웨이 정보/상태 }
   - { name: devices, description: 기기 목록/상태/제어 }
   - { name: events, description: 실시간 이벤트 (SSE) }
   - { name: pairing, description: Matter 기기 페어링 (신규) }
 
 paths:
+  /healthz:
+    get:
+      tags: [lan]
+      summary: 헬스 체크 (LAN 3000, loopback 3001 모두)
+      security: []
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { const: true } } } } } }
+
+  /api/gateway:
+    get:
+      tags: [lan]
+      summary: 축소 게이트웨이 정보 (LAN 3000, 무인증)
+      description: 출고 모드 응답은 아래 필드만. dev 모드는 registered·hasCode·registrationCode·codeExpiresAt 이 더 붙는다.
+      security: []
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PublicGateway" } } } }
+
   /siot-app/api/v1/claim:
     post:
       tags: [claim]
-      summary: 등록 코드로 게이트웨이 클레임 (무인증, 1회용)
-      description: 사용자가 게이트웨이 로컬 페이지(또는 앱 화면)에서 발급한 8자리 코드를 입력하면 플랫폼이 호출한다. 성공 시 코드는 즉시 폐기된다.
+      summary: 등록 코드로 게이트웨이 클레임 (dev 모드 전용, 무인증, 1회용)
+      description: |
+        **출고 모드에서는 없다(404)** — 바인딩은 릴레이 `bind` 프레임. dev 모드에서 로컬 페이지가 발급한 8자리 코드로 호출한다.
+        성공 시 코드는 즉시 폐기된다. 이미 토큰이 있으면 `409`.
       security: []
       requestBody:
         required: true
@@ -34,6 +64,8 @@ paths:
       responses:
         "200": { description: 발급 성공, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, gatewayId: { $ref: "#/components/schemas/GatewayId" }, gatewayToken: { type: string, description: 64 hex, example: "9f1c...e2" } } } } } }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { description: 출고 모드(경로 없음) }
+        "409": { description: 이미 등록됨(토큰 있음) }
 
   /siot-app/api/v1/gateway:
     get:
@@ -106,10 +138,10 @@ paths:
       description: |
         `text/event-stream`. 연결 직후 `: connected`, 25초마다 `: ping`.
         - 기본 메시지(`data:`): `{"type":"device","device":<SiotDevice>}` — 기기 상태 변경
-        - `event: pairing` — `{"sessionId","stage","error","deviceId","attempt?","maxAttempts?"}` 페어링 진행 (commissioning 은 BLE 연결 실패 시 재시도되며 attempt 가 증가)
+        - `event: pairing` — `{"sessionId","stage","error","errorCode","deviceId","attempt?","maxAttempts?"}` 페어링 진행 (commissioning 은 BLE 연결 실패 시 재시도되며 attempt 가 증가)
         - `event: device_removed` — `{"id","deviceId"}`
-        EventSource 는 헤더를 못 보내므로 `?token=` 을 사용한다.
-      parameters: [ { name: token, in: query, schema: { type: string } } ]
+        출고 모드는 `Authorization: Bearer` 만(쿼리 토큰 401). dev 모드만 EventSource 용 `?token=` 허용.
+      parameters: [ { name: token, in: query, schema: { type: string }, description: "dev 모드 전용. 출고 모드에서 주면 401" } ]
       responses:
         "200": { description: 스트림, content: { text/event-stream: { schema: { type: string } } } }
         "401": { $ref: "#/components/responses/Unauthorized" }
@@ -135,6 +167,15 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "409": { description: 다른 페어링 진행 중 }
 
+  /siot-app/api/v1/sim/door:
+    post:
+      tags: [devices]
+      summary: "도어 센서 토글 (MATTER_BACKEND=sim 전용, 개발·시뮬레이션)"
+      description: sim 백엔드가 아니면 404. 도어 센서(노드 2)의 BooleanState 를 뒤집어 device 이벤트를 만든다.
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { const: true }, nodeId: { type: integer }, closed: { type: boolean } } } } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /siot-app/api/v1/pairing/{sessionId}:
     get:
       tags: [pairing]
@@ -147,15 +188,31 @@ paths:
 components:
   securitySchemes:
     bearer: { type: http, scheme: bearer }
-    tokenQuery: { type: apiKey, in: query, name: token }
+    tokenQuery: { type: apiKey, in: query, name: token, description: "dev 모드 전용 (출고 모드 401)" }
   parameters:
     DeviceId: { name: id, in: path, required: true, schema: { type: string }, description: "SiotDevice.id (예: matter:12:1)", example: "matter:12:1" }
   responses:
-    Unauthorized: { description: 토큰 없음/불일치/미등록, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Unauthorized: { description: "토큰 없음/불일치/미등록, 또는 출고 모드의 쿼리 토큰(?token=)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
     BadRequest: { description: 잘못된 요청, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
     NotFound: { description: 없음, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
   schemas:
     GatewayId: { type: string, pattern: "^gw_[0-9a-f-]{36}$", example: "gw_739f694e-76be-5888-be41-639544c21b5b" }
+    PublicGateway:
+      type: object
+      required: [gatewayId, shortId, bound, version, pubKey]
+      properties:
+        ok: { const: true }
+        gatewayId: { $ref: "#/components/schemas/GatewayId" }
+        shortId: { type: string, pattern: "^[0-9a-f]{8}$", description: "라벨 코드 siot-<shortId>" }
+        bound: { type: boolean, description: 클라우드 세대에 바인딩됨(토큰 보유) }
+        version: { type: string, example: "0.3.0" }
+        pubKey: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", description: "Ed25519 장치 공개키 raw 32바이트 base64url(공장 사전 등록용)" }
+    PairingErrorCode:
+      type: string
+      enum: [CODE_INVALID, DEVICE_NOT_FOUND, THREAD_NOT_READY, ATTESTATION_REJECTED, BLE_TRANSIENT, UNKNOWN]
+      description: |
+        CODE_INVALID 코드 오류 · DEVICE_NOT_FOUND 기기 안 잡힘(BLE 재시도 소진 포함) · THREAD_NOT_READY Thread 미설정 ·
+        ATTESTATION_REJECTED 인증 거부 · BLE_TRANSIENT BLE 일시 실패(시도 단위 lastErrorCode 에만, 세션 최종 코드에는 안 나옴) · UNKNOWN 기타
     Error: { type: object, properties: { ok: { const: false }, error: { type: string } } }
     Action:
       type: string
@@ -195,19 +252,20 @@ components:
         engine:
           type: object
           description: 추가 필드(Matter 게이트웨이 전용)
-          properties: { kind: { type: string }, backend: { type: string, enum: [server, embedded] }, threadCredentialsSet: { type: boolean }, bluetooth: { type: boolean } }
+          properties: { kind: { type: string }, backend: { type: string, enum: [server, embedded, sim] }, threadCredentialsSet: { type: boolean }, bluetooth: { type: boolean } }
     PairingSession:
       type: object
       properties:
         sessionId: { type: string, format: uuid }
         stage: { type: string, enum: [queued, thread_dataset, commissioning, interviewing, done, failed], description: "commissioning: BLE 탐색·PASE·인증·Thread 가입 / interviewing: 기기 기능 읽기" }
         startedAt: { type: string, format: date-time }
-        deviceId: { type: [string, "null"], description: 내부 기기 id (matter:<nodeId>) }
+        deviceId: { type: [string, "null"], description: "내부 기기 id (matter:<nodeId>)" }
         devices: { type: array, items: { $ref: "#/components/schemas/SiotDevice" }, description: 완료 시 생성된 SiotDevice 들 }
         error: { type: [string, "null"] }
+        errorCode: { oneOf: [ { $ref: "#/components/schemas/PairingErrorCode" }, { type: "null" } ], description: "failed 일 때 분류 코드 (2.0 신규)" }
         attempt: { type: [integer, "null"], description: "현재/마지막 커미셔닝 시도 번호 (BLE 연결 실패 시 재시도)" }
         maxAttempts: { type: [integer, "null"] }
-        events: { type: array, items: { type: object, properties: { stage: { type: string }, at: { type: integer }, hint: { type: string }, error: { type: string }, attempt: { type: integer }, maxAttempts: { type: integer }, lastError: { type: string } } } }
+        events: { type: array, items: { type: object, properties: { stage: { type: string }, at: { type: integer }, hint: { type: string }, error: { type: string }, errorCode: { $ref: "#/components/schemas/PairingErrorCode" }, attempt: { type: integer }, maxAttempts: { type: integer }, lastError: { type: string }, lastErrorCode: { $ref: "#/components/schemas/PairingErrorCode" } } } }
 security:
   - bearer: []
   - tokenQuery: []

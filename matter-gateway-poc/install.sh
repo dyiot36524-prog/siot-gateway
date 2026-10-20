@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 # 시옷 Matter/Thread 게이트웨이 설치 스크립트 — Raspberry Pi OS Lite (64-bit) 에서 1회 실행.
-#   curl -fsSL <raw url>/install.sh | sudo bash      또는   sudo ./install.sh
+#   curl -fsSL <raw url>/install.sh | sudo bash      또는   sudo ./install.sh [--mode=production|dev] [--thread=defer|auto]
+#   (파이프 실행 시 인자:  curl ... | sudo bash -s -- --mode=dev --thread=auto)
 # 멱등: 다시 실행해도 안전. 설치 위치 /opt/matter-gateway.
+#   --mode=production (기본) LAN 3000 은 상태만, 전체 API 는 127.0.0.1:3001. 바인딩은 클라우드 릴레이 bind
+#   --mode=dev               기존 단일 서버(로컬 페이지에서 등록 코드·페어링·제어)
+#   --thread=defer (기본)    Thread 망을 만들지 않는다(세대 cfg 의 thread 모드가 정함). 이미 데이터셋이 있으면 그대로 올린다
+#   --thread=auto            dev 용 기존 동작: 데이터셋이 없으면 새 망을 만든다
 set -euo pipefail
+
+THREAD_MODE=defer
+MODE_ARG=""
+for arg in "$@"; do
+  case "$arg" in
+    --thread=auto|--thread=defer) THREAD_MODE="${arg#--thread=}" ;;
+    --mode=production|--mode=dev) MODE_ARG="${arg#--mode=}" ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *) echo "알 수 없는 인자: $arg (사용: --mode=production|dev --thread=defer|auto)" >&2; exit 2 ;;
+  esac
+done
 
 TARGET=/opt/matter-gateway
 REPO_URL="${REPO_URL:-https://github.com/dyiot36524-prog/siot-gateway.git}"
@@ -50,10 +66,11 @@ else
 fi
 cd "$TARGET"
 mkdir -p data/otbr data/matter data/agent
-# matterjs-server 이미지는 비root(기본 1000:1000)로 실행되므로 데이터 디렉터리 소유권을 맞춘다
-MATTER_UID=$(docker image inspect ghcr.io/matter-js/matterjs-server:stable --format '{{.Config.User}}' 2>/dev/null || true)
-chown -R "${MATTER_UID:-1000:1000}" data/matter
-[ -f rules.json ] || cp agent/rules.example.json rules.json
+# 에이전트 마운트 경계(계획 §2 d): requests(쓰기), health(쓰기), out(읽기 전용). OTA 상태·백업은 마운트 밖 /var/lib/siot
+mkdir -p state/requests/ota state/requests/ctl state/health state/out
+mkdir -p -m 0700 /var/lib/siot
+# 규칙은 에이전트 데이터 볼륨(/app/data/rules.json)으로 이관. 기존 ./rules.json 이 있으면 최초 1회 복사, 없으면 에이전트가 예시를 복사
+if [ -f rules.json ] && [ ! -f data/agent/rules.json ]; then cp rules.json data/agent/rules.json; log "rules.json → data/agent/rules.json 이관"; fi
 
 # ── 4. 커널/네트워크 설정 ────────────────────────────────────────────────
 log "sysctl / systemd 설정"
@@ -91,42 +108,69 @@ else
 fi
 
 # ── 6. .env ──────────────────────────────────────────────────────────────
+DEFAULT_OTBR_IMAGE=openthread/border-router@sha256:70d2260eb5022f4c40be4f50195a1952d49041fc766fb3b2f213b06dcdc31a18
+DEFAULT_MATTER_IMAGE=ghcr.io/matter-js/matterjs-server@sha256:54232d0d3e7dff5a54759469d2753399270412b4c30c55b31750a4595e4cb236
 if [ ! -f .env ]; then
   cat > .env <<ENV
 ZBT2_DEV=$ZBT2_DEV
 BACKBONE_IF=$BACKBONE_IF
 SIOT_GATEWAY_VERSION=$(jq -r .version agent/package.json 2>/dev/null || echo 0.2.0)
+SIOT_MODE=${MODE_ARG:-production}
 SIOT_RELAY_URL=${SIOT_RELAY_URL:-}
 MATTER_BACKEND=${MATTER_BACKEND:-server}
 LOG_LEVEL=info
+OTBR_IMAGE=$DEFAULT_OTBR_IMAGE
+MATTER_IMAGE=$DEFAULT_MATTER_IMAGE
+AGENT_IMAGE=${AGENT_IMAGE:-siot-matter-agent:local}
 ENV
 else
   sed -i "s#^ZBT2_DEV=.*#ZBT2_DEV=$ZBT2_DEV#; s#^BACKBONE_IF=.*#BACKBONE_IF=$BACKBONE_IF#" .env
+  # --mode 를 주면 덮어쓰고, 없으면 기존 값 유지(키가 없으면 production 추가)
+  if [ -n "$MODE_ARG" ]; then
+    if grep -q '^SIOT_MODE=' .env; then sed -i "s#^SIOT_MODE=.*#SIOT_MODE=$MODE_ARG#" .env; else echo "SIOT_MODE=$MODE_ARG" >> .env; fi
+  else
+    grep -q '^SIOT_MODE=' .env || echo "SIOT_MODE=production" >> .env
+  fi
 fi
+SIOT_MODE=$(grep -m1 '^SIOT_MODE=' .env | cut -d= -f2-)
+MATTER_IMAGE=$(grep -m1 '^MATTER_IMAGE=' .env | cut -d= -f2- || true); MATTER_IMAGE=${MATTER_IMAGE:-$DEFAULT_MATTER_IMAGE}
+AGENT_IMAGE=$(grep -m1 '^AGENT_IMAGE=' .env | cut -d= -f2- || true); AGENT_IMAGE=${AGENT_IMAGE:-siot-matter-agent:local}
+log "모드: $SIOT_MODE, Thread: $THREAD_MODE"
 
 # ── 7. 컨테이너 빌드/기동 ────────────────────────────────────────────────
 log "컨테이너 빌드 및 기동 (최초 수 분 소요)"
 docker compose pull --ignore-buildable --quiet || true
-MATTER_UID=$(docker image inspect ghcr.io/matter-js/matterjs-server:stable --format '{{.Config.User}}' 2>/dev/null || true)
+# matterjs-server 이미지는 비root(기본 1000:1000)로 실행되므로 데이터 디렉터리 소유권을 맞춘다
+MATTER_UID=$(docker image inspect "$MATTER_IMAGE" --format '{{.Config.User}}' 2>/dev/null || true)
 chown -R "${MATTER_UID:-1000:1000}" data/matter
-docker compose build --quiet agent
+# 레지스트리 이미지(digest)면 pull 로 충분하고, 로컬 태그일 때만 빌드한다
+case "$AGENT_IMAGE" in *@sha256:*) ;; *) docker compose build --quiet agent ;; esac
 docker compose up -d otbr
-# ── 8. Thread 네트워크 형성(최초 1회) ───────────────────────────────────
+# ── 8. Thread 네트워크 (auto: 최초 1회 형성 / defer: 형성하지 않음) ──────
 log "OTBR 대기"
 for i in $(seq 1 30); do docker exec otbr ot-ctl state >/dev/null 2>&1 && break; sleep 2; done
 STATE=$(docker exec otbr ot-ctl state 2>/dev/null | head -1 | tr -d '\r' || echo unknown)
+HAS_DATASET=0
+docker exec otbr ot-ctl dataset active -x 2>/dev/null | grep -qE '^[0-9a-f]{20,}' && HAS_DATASET=1
 if [ "$STATE" = "disabled" ] || [ "$STATE" = "detached" ]; then
-  if ! docker exec otbr ot-ctl dataset active -x 2>/dev/null | grep -qE '^[0-9a-f]{20,}'; then
-    log "Thread 네트워크 생성"
+  if [ "$HAS_DATASET" = 0 ] && [ "$THREAD_MODE" = auto ]; then
+    log "Thread 네트워크 생성 (--thread=auto)"
     NET_NAME="siot-$(tr -dc a-z0-9 </dev/urandom | head -c 6)"
     docker exec otbr sh -c "ot-ctl dataset init new && ot-ctl dataset networkname $NET_NAME && ot-ctl dataset commit active" >/dev/null
+    HAS_DATASET=1
   fi
-  docker exec otbr sh -c "ot-ctl ifconfig up && ot-ctl thread start" >/dev/null
+  if [ "$HAS_DATASET" = 1 ]; then
+    docker exec otbr sh -c "ot-ctl ifconfig up && ot-ctl thread start" >/dev/null
+  else
+    log "Thread 망 형성 보류(--thread=defer): 세대 설정(cfg thread 모드)으로 형성/합류합니다"
+  fi
 fi
-for i in $(seq 1 30); do
-  STATE=$(docker exec otbr ot-ctl state 2>/dev/null | head -1 | tr -d '\r' || echo unknown)
-  [ "$STATE" = "leader" ] && break; sleep 2
-done
+if [ "$HAS_DATASET" = 1 ]; then
+  for i in $(seq 1 30); do
+    STATE=$(docker exec otbr ot-ctl state 2>/dev/null | head -1 | tr -d '\r' || echo unknown)
+    case "$STATE" in leader|router|child) break ;; esac; sleep 2
+  done
+fi
 log "OTBR 상태: $STATE"
 
 docker compose up -d
@@ -135,21 +179,31 @@ systemctl start matter-gateway.service || true
 
 # ── 9. 요약 ──────────────────────────────────────────────────────────────
 sleep 5
-GID=$(curl -fsS http://127.0.0.1:3000/api/gateway 2>/dev/null | jq -r .gatewayId || echo "(에이전트 기동 중)")
-SHORT=${GID:3:8}
+# 축소 /api/gateway {gatewayId, shortId, bound, version, pubKey} 와 dev 확장 응답 모두 호환
+GW_JSON=$(curl -fsS http://127.0.0.1:3000/api/gateway 2>/dev/null || echo '{}')
+GID=$(echo "$GW_JSON" | jq -r '.gatewayId // "(에이전트 기동 중)"')
+SHORT=$(echo "$GW_JSON" | jq -r '.shortId // empty'); SHORT=${SHORT:-${GID:3:8}}
+BOUND=$(echo "$GW_JSON" | jq -r 'if (.bound // .registered) then "연결됨" else "미연결" end')
+VER=$(echo "$GW_JSON" | jq -r '.version // "-"')
 IP=$(hostname -I | awk '{print $1}')
+if [ "$SIOT_MODE" = dev ]; then
+  NEXT="   1) 로컬 페이지에서 \"등록 코드 발급\" → 시옷플랫폼 앱에 입력(claim)
+   2) IKEA 기기 QR 을 로컬 페이지(또는 앱)에 입력해 페어링"
+else
+  NEXT="   1) 설치 기사 앱에서 라벨 코드 siot-$SHORT 로 게이트웨이 등록(클라우드 릴레이 bind)
+   2) 기기 페어링·제어는 기사 앱에서 (LAN 페이지는 상태 확인용, 전체 API 는 127.0.0.1:3001)"
+fi
 cat <<SUMMARY
 
 ============================================================
- 설치 완료
-   gatewayId : $GID
+ 설치 완료 ($SIOT_MODE, thread=$THREAD_MODE)
+   gatewayId : $GID   (v$VER, 세대 $BOUND)
    로컬 페이지: http://siot-$SHORT.local:3000  (또는 http://$IP:3000)
    OTBR      : $STATE   (웹 GUI http://$IP/)
    Matter    : docker logs -f matterjs-server
    에이전트  : docker logs -f gateway-agent
  다음 단계
-   1) 로컬 페이지에서 "등록 코드 발급" → 시옷플랫폼 앱에 입력(claim)
-   2) IKEA 기기 QR 을 로컬 페이지(또는 앱)에 입력해 페어링
+$NEXT
    3) 전원 재투입 후 http://siot-$SHORT.local:3000 이 다시 뜨는지 확인
 ============================================================
 SUMMARY

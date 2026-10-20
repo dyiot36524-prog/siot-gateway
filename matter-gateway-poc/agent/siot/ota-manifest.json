@@ -1,0 +1,6 @@
+{
+  "agentVersion": "0.0.0-dev",
+  "otaShSha256": "",
+  "minVersionFloor": "0.0.0",
+  "note": "placeholder — CI(.github/workflows/gateway-agent-image.yml) 가 태그 버전과 ota.sh 해시로 덮어쓴다. 서명(.sig)은 M4."
+}

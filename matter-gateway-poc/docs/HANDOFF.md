@@ -29,7 +29,7 @@
 - 저장소: `dyiot36524-prog/siot-gateway` (main). 새 GitHub 저장소 생성은 클라우드 세션에서 불가해 기존 저장소에 하위 디렉터리로 넣음.
 - 병합된 PR: #1(PoC 초기), #2(Pi 설치본 + 플랫폼 API 계약 + OpenAPI/가이드/CI).
 - `.claude/skills/deep-interview/`: oh-my-claudecode 의 deep-interview 스킬 복사(MIT). 저장소 루트에서 세션을 열면 `/deep-interview` 사용 가능. OMC 의 후속 스킬(omc-plan, ralph 등)은 없음.
-- CI: `.github/workflows/matter-gateway-test.yml` — `matter-gateway-poc/**` 변경 시 agent 테스트 15건 + compose 문법 검사.
+- CI: `.github/workflows/matter-gateway-test.yml` — `matter-gateway-poc/**` 변경 시 agent 테스트 82건(2026-10-20 기준: 기존 26 + relay-v2 계약 36 + Step 2 출고 모드·릴레이·분류기·sim 20) + compose 문법 검사. 에이전트 이미지는 `.github/workflows/gateway-agent-image.yml`(태그 `agent-v*` → GHCR arm64).
 
 ```
 matter-gateway-poc/

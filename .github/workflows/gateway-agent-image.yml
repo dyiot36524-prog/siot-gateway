@@ -1,0 +1,105 @@
+# 게이트웨이 에이전트 출고 이미지 — arm64(Pi 5) 빌드 후 GHCR 푸시. 태그 agent-v<semver> 에서만 푸시한다.
+#   ghcr.io/dyiot36524-prog/siot-gateway-agent:<version>  (+ OTA 는 태그가 아니라 @sha256 digest 로 지정: .env AGENT_IMAGE)
+# 이미지 안 /siot/ota.sh(적용 훅)·/siot/ota-manifest.json 을 넣는다. manifest 는 여기서 버전·훅 해시로 채운다.
+# 서명(M4, 계획 §2 d): ota-manifest.json.sig(Ed25519) 와 cosign 이미지 서명은 아직 없다 — 아래 placeholder 단계 참고.
+name: "게이트웨이 에이전트 이미지"
+
+on:
+  push:
+    tags: ["agent-v*"]
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "GHCR 에 푸시 (태그가 아니면 버전은 0.0.0-<sha>)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/dyiot36524-prog/siot-gateway-agent
+
+jobs:
+  image:
+    name: "arm64 buildx → GHCR"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: matter-gateway-poc/agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: matter-gateway-poc/agent/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+      - name: 버전 결정
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/agent-v* ]]; then V="${GITHUB_REF#refs/tags/agent-v}"; else V="0.0.0-${GITHUB_SHA::7}"; fi
+          [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo "잘못된 버전: $V" >&2; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: OTA manifest 채우기 (/siot/ota-manifest.json)
+        run: |
+          SHA=$(sha256sum siot/ota.sh | cut -d' ' -f1)
+          FLOOR=$(jq -r '.minVersionFloor // "0.0.0"' siot/ota-manifest.json)
+          jq -n --arg v "${{ steps.ver.outputs.version }}" --arg h "$SHA" --arg f "$FLOOR" \
+            '{agentVersion:$v, otaShSha256:$h, minVersionFloor:$f}' > siot/ota-manifest.json
+          cat siot/ota-manifest.json
+
+      # ---- M4 placeholder: manifest 서명 ----
+      # - name: manifest 서명
+      #   env: { OTA_SIGNING_KEY: "${{ secrets.OTA_SIGNING_KEY }}" }   # Ed25519 PEM, GH secret 에만 보관
+      #   run: |
+      #     printf '%s' "$OTA_SIGNING_KEY" > /tmp/ota.key
+      #     openssl pkeyutl -sign -inkey /tmp/ota.key -rawin -in siot/ota-manifest.json -out siot/ota-manifest.json.sig
+      #     rm -f /tmp/ota.key
+
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: arm64 }
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: startsWith(github.ref, 'refs/tags/agent-v') || inputs.push
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build (+push)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: matter-gateway-poc/agent
+          file: matter-gateway-poc/agent/Dockerfile
+          platforms: linux/arm64
+          build-args: AGENT_VERSION=${{ steps.ver.outputs.version }}
+          push: ${{ startsWith(github.ref, 'refs/tags/agent-v') || inputs.push == true }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.ver.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ---- M4 placeholder: cosign 이미지 서명(호스트 siot-ota.sh 가 pulling 단계에서 cosign verify) ----
+      # - uses: sigstore/cosign-installer@v3
+      # - run: cosign sign --yes --key env://COSIGN_PRIVATE_KEY "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"
+      #   env: { COSIGN_PRIVATE_KEY: "${{ secrets.COSIGN_PRIVATE_KEY }}", COSIGN_PASSWORD: "${{ secrets.COSIGN_PASSWORD }}" }
+
+      - name: 요약
+        run: |
+          {
+            echo "### siot-gateway-agent ${{ steps.ver.outputs.version }}"
+            echo "- digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- .env: \`AGENT_IMAGE=${{ env.IMAGE }}@${{ steps.build.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
