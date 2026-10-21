@@ -171,6 +171,6 @@ main 의 M1 커밋(e304215·597abf0·d789eff·469fd58)을 Pi 에 반영하고 �
 6. 플러그 제어 20건 중 1건 5.9초 지연은 5b·5c 와 같은 빈도(약 1/20). C3 ①(100회, ≤3초 99회 이상) 측정 시 이 비율이면 통과 경계이므로 실제 100회 측정이 필요하다(배포 후 `tools/slo/control-100.ts`).
 
 ### 미검증·남은 것
-- `ExecStop=stop`(정상 종료 시 컨테이너 보존): 이번 재부팅은 전원 차단이라 ExecStop 이 실행되지 않았다. 터미널 탭에서 `sudo systemctl stop matter-gateway && docker ps -a`(3개 Exited 로 남아야 함) → `sudo systemctl start matter-gateway` 로 1회 확인 권장. 전원 차단 경로에서는 docker 의 `unless-stopped` 가 부팅 때 먼저 올리고 compose 는 `Running` 만 확인했다.
+- (완료 22:59 KST) `ExecStop=stop` 정상 종료 경로: 터미널 탭에서 `sudo systemctl stop matter-gateway && docker ps -a && sudo systemctl start matter-gateway` → stop 뒤 컨테이너 3개가 **같은 ID 로 `Exited (0)`** 보존(삭제되지 않음), start 뒤 15초 안에 3개 `Up`(matterjs-server healthy), 기기 2대 online 복귀(journal: stop 은 otbr 종료에 9초, start 뒤 에이전트 synced +6초, 플러그 online +5초, 센서 +19초). 전원 차단 재부팅 경로에서는 docker 의 `unless-stopped` 가 부팅 때 먼저 올리고 compose 는 `Running` 만 확인했다.
 - C3 ①·②(플러그 100회·같은 명령 10회), 인터넷 차단 상태를 **길게 유지한** 재부팅(이번엔 WAN 복구가 부팅 30초 뒤), Fly 배포 후의 C3 ③ 재측정(인터넷 경유 443).
 - 임시 파일: Pi `~/m1-sudo.sh`, `~/c3-cycle.sh`, `~/c3-cycle.log`, `~/plug-check.py`, `~/plug-check-*.log`, `~/door-sse.log`, `~/pre-reboot.txt`, `~/images-{before,after}.txt`, `~/.gw-token`(3001 Bearer, 0600), `~/backup-m1-20261021-0101/`. Mac 로컬 DB(`siot_dev`)에 Pi GW 행·세대·기사 계정·API 키·웹훅이 남아 있다.
