@@ -1,4 +1,4 @@
-# 인수인계 — Matter/Thread 게이트웨이 (2026-10-20 기준)
+# 인수인계 — Matter/Thread 게이트웨이 (2026-10-21 기준)
 
 새 세션에서 이 문서만 읽으면 이어서 작업할 수 있도록 지금까지의 결정, 만든 것, 현재 상태, 다음 할 일을 정리한다.
 
@@ -34,8 +34,8 @@
 ```
 matter-gateway-poc/
   install.sh                 Pi OS 에서 sudo 로 1회 실행 (멱등). /opt/matter-gateway 에 설치
-  docker-compose.yml         otbr(openthread/border-router:v2026.10.0, OT_* 환경변수) / matter(matterjs-server) / agent
-                             (+ profile embedded: agent-embedded)
+  docker-compose.yml         otbr(openthread/border-router, OT_* 환경변수) / matter(matterjs-server) / agent — 서드파티 2종은 .env OTBR_IMAGE/MATTER_IMAGE 의
+                             @sha256 digest 고정(부팅 때 pull 없음). agent 마운트는 data/agent, state/{requests,health,out:ro} 만 (+ profile embedded: agent-embedded)
   host/                      99-matter-thread.conf(sysctl), ipv6-forwarding-fix.service, ble-conn-params.service(BLE supervision timeout), matter-gateway.service,
                              flash-zbt2.sh, flash-thread-rcp.sh, patches/matterjs-server/NobleBleChannel.js(BLE 재시도 백포트, compose 가 bind-mount)
   agent/src/
@@ -117,9 +117,9 @@ GRILLPLATS(QR `MT:CUO000QV1769DQ3C310`, disc 1671) 와 MYGGBETT(QR `MT:QDKT1CEK0
 4. `sudo -n` 은 터미널 탭에서 비밀번호를 입력해 sudo 캐시가 살아 있을 때만 통과. 재부팅 직후 `supervision_timeout` 직접 읽기는 터미널 탭에서 `sudo cat` 필요(이번 재부팅 후 직접 읽기 = 200 확인).
 
 ## 6. 바로 다음 할 일
-1. (완료) AC-1 재부팅 복구, (완료) AC-5 두 기기 커미셔닝·제어·이벤트. Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용). 소스 수정 후 반영: `rsync` 로 `~/matter-gateway-poc` 갱신 → `sudo ./install.sh` 재실행(멱등) 또는 `/opt/matter-gateway` 에서 `docker compose build agent && docker compose up -d`.
-2. **24시간 안정성(AC)**: 창 시작 2026-10-20 01:06 KST. 2026-10-21 01:06 이후 `scripts/stability-check.sh` 로 재점검해 5c 표를 갱신(재접속·세션 오류·구독 끊김 0, 두 기기 online, 센서 battery 보고 확인). 재부팅 복원은 5c 에서 통과.
-3. claim 흐름 실측(플랫폼팀 또는 curl 로 `POST /siot-app/api/v1/claim`) 과 플랫폼 페어링 화면 연동.
+1. (완료) AC-1 재부팅 복구, (완료) AC-5 두 기기 커미셔닝·제어·이벤트, (완료 2026-10-21) M1 에이전트 Pi 반영·B7·인터넷 차단 재부팅·C3 ③ — §9. Pi 의 설치본은 `/opt/matter-gateway`(저장소 main 과 동일 내용, `SIOT_MODE=production`). 소스 수정 후 반영: `rsync` 로 `~/matter-gateway-poc/matter-gateway-poc` 갱신 → 터미널 탭에서 `sudo ./install.sh --mode=production --thread=defer`(멱등) 또는 `/opt/matter-gateway` 에서 `docker compose build agent && docker compose up -d --pull missing`.
+2. (완료) **24시간 안정성(AC)**: 2026-10-20 01:06 ~ 10-21 01:02 KST 구간을 `stability-check.sh 24h` 로 점검 — 컨테이너 재시작 0, 에이전트 재접속 0(ERROR 2건은 부팅 직후 ECONNREFUSED), 두 기기 online, 센서 battery 100 보고. 단 matterjs-server 가 10-20 21:36 과 21:51 에 플러그(@1:5)를 "offline grace period expired" 로 잠시 unavailable 처리 후 재구독한 기록 2건(각 수십 초, 제어 영향 없음) — §9 발견 사항 참고.
+3. claim 흐름 실측(플랫폼팀 또는 curl 로 `POST /siot-app/api/v1/claim`) 과 플랫폼 페어링 화면 연동. relay-v2 bind 는 Mac 로컬 백엔드로 실측 완료(§9).
 4. matterjs-server 가 matter.js > 0.17.9 로 올라오면 `host/patches` bind-mount 와 `MATTER_IMAGE` 재검토. 추가 기기(IKEA 조명 등)로 멀티 어드민(commissioning-window) 검증.
 5. 로그: `docker logs gateway-agent`, `docker logs matterjs-server`, `docker exec otbr ot-ctl state|neighbor table`, `~/install2.log`. BLE 심층 추적은 `sudo btmon`.
 
@@ -133,3 +133,44 @@ GRILLPLATS(QR `MT:CUO000QV1769DQ3C310`, disc 1671) 와 MYGGBETT(QR `MT:QDKT1CEK0
 - IKEA 두 기기는 Dirigera 없이 타사 컨트롤러에 직접 페어링됨. 센서는 Thread 보더 라우터 필수. GRILLPLATS 는 QR 인식 문제 보고가 있어 11자리 수동 코드 경로도 지원함.
 - 기존 siot-app 계약 참조 파일: `siot-app/lib/{gateway-id,gateway-identity,registration,platform-auth,types,device-mapper,control-map,mdns,relay-agent,system-status}.ts`, `siot-app/app/siot-app/api/v1/*`.
 - VENDOR_ID 0xFFF1(=65521) 은 테스트용. compose 에는 **10진수**로 적을 것(5b-3 참고). 상용은 CSA 가입 후 발급 VID 필요.
+
+## 9. M1 에이전트 Pi 실기기 반영·검증 (2026-10-21 01:00~22:40 KST)
+main 의 M1 커밋(e304215·597abf0·d789eff·469fd58)을 Pi 에 반영하고 계획 §3 B7, Step 2 완료 조건(인터넷 차단 재부팅), C3 ③ 을 실측했다. 코드 수정은 없고 이 문서만 갱신. 로그 시각은 docker 로그 기준 UTC(KST −9h).
+
+### 반영 절차 (그대로 재현 가능)
+1. 반영 전: `/opt/matter-gateway/.env`·`docker-compose.yml`·`compose ps`·`compose config`·systemd unit 을 Pi `~/backup-m1-20261021-0101/` 에 백업. `docker image inspect` 로 compose 의 digest 고정값이 Pi 에 이미 있는 이미지와 일치함을 확인(otbr `70d2260e…` = v2026.10.0, matterjs-server `54232d0d…` = stable/latest, RepoDigests 보유).
+2. Mac 에서 `rsync -az --exclude node_modules --exclude data --exclude .env matter-gateway-poc/` → Pi `~/matter-gateway-poc/matter-gateway-poc/`(소스) 와 `/opt/matter-gateway/`(설치본, `state/`·`.claude`·`.omc` 도 제외).
+3. `.env` 에 `SIOT_MODE=production`, `SIOT_RELAY_URL=off`, `OTBR_IMAGE`/`MATTER_IMAGE`(digest), `AGENT_IMAGE=siot-matter-agent:local`, `PAIRING_MAX_ATTEMPTS=3` 추가. `.env` 는 root 소유였으나 디렉터리가 gslt 소유라 `mv`+`cp` 로 gslt 소유 사본으로 교체(`.env.pre-m1.bak` 보관). `state/{requests/{ota,ctl},health,out}` 생성.
+4. `docker compose config -q` 통과 → `docker compose build agent`(약 20초, 캐시) → `docker compose up -d --pull missing --remove-orphans`: 컨테이너 3개 Recreate(이미지 참조가 태그→digest 로 바뀌어 otbr·matter 도 재생성, Thread 망은 data/otbr 로 유지되어 `leader` 즉시 복귀). 전후 `docker images --digests` 동일 → **pull 없음**.
+5. root 가 필요한 부분(`/etc/systemd/system/matter-gateway.service` 갱신, `/var/lib/siot`)은 터미널 탭에서 `ssh -t gslt@192.168.0.172 'sudo bash ~/m1-sudo.sh'` 로 `install.sh --mode=production --thread=defer` 재실행(21:43 KST, 멱등). 결과: unit `ExecStart=… up -d --pull missing --remove-orphans` / `ExecStop=… stop`, `/var/lib/siot` 0700, `ble-conn-params` supervision_timeout 200 유지, Thread 데이터셋 있음 → defer 라도 기존 망 그대로.
+
+### 확인 결과
+| 항목 | 결과 |
+|---|---|
+| production 기동 | **통과**. 에이전트 로그 `mode=production`, `listening on 0.0.0.0:3000`, `local admin API on 127.0.0.1:3001`, `ss -ltn` 에 3000(0.0.0.0)·3001(127.0.0.1). Ed25519 장치 키 최초 생성(pubKey `19SwjE5E…JNU`), `rules seeded: /app/rules.example.json → /app/data/rules.json`(기존 `./rules.json` 과 내용 동일), `data/agent/gateway.json` **0600**(512B, deviceKey·token 포함), `state/health/health.json` 10초 간격 갱신(`writtenAt` 16:05:09 → 16:05:19) |
+| B7 ① LAN `POST :3000/api/register` | **404** (`GET :3000/siot-app/api/v1/devices` 도 404) |
+| B7 ② LAN `:3001/` | **연결 거부**(curl exit 7) |
+| B7 ③ Pi `curl ':3001/siot-app/api/v1/devices?token=x'` | **401** `미등록 게이트웨이입니다`(bind 전). bind 후에도 쿼리 토큰은 401 |
+| B7 ④ Bearer 헤더 | **200**, `count:2`, `matter:5:1`·`matter:6:1` 모두 `online:true`. LAN `GET :3000/api/gateway` 는 `{gatewayId, shortId:"dd10c2c3", bound, version, pubKey}` 만. 출고 상태 페이지 `http://192.168.0.172:3000/` 브라우저 확인(에이전트 정상·라벨 코드 dd10c2c3·세대 연결됨, 콘솔 오류 0) |
+| 플러그 ON/OFF 10회(명령 20건, 3001 Bearer + SSE 확정) | **19/20 ≤2초**. 확정 중앙값 128ms·HTTP 중앙값 80ms. 1건(ON, 19번째) HTTP 5.9s/확정 5.96s — matterjs-server INFO 로그엔 흔적 없음(5b 의 MRP 재전송과 같은 양상으로 추정). 미확정 0 |
+| 도어센서 SSE | **통과**. 22:32:53~22:33:21 KST 자석 6회 뗐다 붙임 → `/siot-app/api/v1/events` 로 12건 모두 전달(open/close 교대, battery 100). 같은 12건이 백엔드 `device.state_changed` 웹훅으로 partner-sim 에 도착(GW 보고 시각 대비 −39~+1272ms, 서명 검증 OK, 중복 0) |
+| 인터넷 차단 재부팅(계획 590행) | **통과**. 22:33:37 공유기 WAN 뽑고 Pi 전원 재투입 → 부팅 후 `network-online` 직후 `matter-gateway.service` 가 **1초 안에 Finished**(journal 에 `Container … Running` 3줄뿐, 이전 unit 의 `Pulling/Pulled` 줄 없음). 컨테이너 **ID 3개 모두 재부팅 전과 동일**(01:04·01:07 생성분 보존), 이미지 목록 동일. OTBR `leader`, `Registered Thread credentials from stored`, 플러그 +6초·센서 +11초 online, 에이전트 `synced 2 nodes`(ECONNREFUSED 2회 후 6초), 릴레이 재접속 +2초, LAN `/api/gateway` bound. NTP 첫 동기는 부팅 33초 뒤(22:34:29) — 그 전에 compose 기동이 끝났으므로 인터넷 없이 기동한 것이 맞다. 단 WAN 은 부팅 30초쯤 뒤 다시 연결됐다(+20s 시점 ghcr.io 도달). `ExecStop=stop` 경로는 전원 차단이라 실행되지 않음(아래 미검증 참고) |
+| C3 ③ (relay 차단 5분 → 해제, 3회) | **통과 3/3**. Mac 로컬 백엔드(`ws://192.168.0.89:8090/gateway`) 기준, `sudo bash ~/c3-cycle.sh`(iptables OUTPUT DROP dst 192.168.0.89:8090). 해제→`gateway.online` 웹훅: **4.7s / 1.8s / 1.0s**(≤60s). 차단→`gateway.offline` 웹훅: 25s / 15s / 15s(서버 heartbeat timeout 25s). 에이전트는 차단 중 `Opening handshake has timed out` 으로 백오프(최대 ~21s) 재시도 |
+
+### C3 ③ 환경(백엔드 미배포라 Mac 로컬로 대체)
+- Mac: `siot-cloud/apps/api` 를 `HOST=0.0.0.0 node --import tsx src/server.ts`(8090, `.env` 의 HOST=127.0.0.1 을 덮어씀), partner-sim 8787. 방화벽 꺼져 있어 Pi 에서 `http://192.168.0.89:8090/healthz` 200.
+- `npm run admin -- gateway:provision --id gw_dd10c2c3-… --pubkey 19SwjE5E… --org org_01M5D05DKTM07803K6HEFGHM23` → 라벨 코드 `8ba9-238d-537e-e48b`. 기사 계정 `installer2@test.local` 생성, 세대 `site_01M5D130PV7H8BD321YNJV597G`("Pi 실기기 세대") 생성 후 `POST /app/v1/gateways/claim` → `bound`, 에이전트 로그 `bound … 토큰으로 재접속` → `cfg 적용 v1`. 웹훅 `wh_01M5D11Y058WGTAGE1SMHHKXE7`(gateway.online/offline, device.state_changed → `http://127.0.0.1:8787/hook`). 이전 QA 의 sim 웹훅(`wh_01M5D0BH…`, 비밀 다름)은 401 재시도를 내서 삭제.
+- 검증 뒤 Pi `.env` 는 다시 **`SIOT_RELAY_URL=off`** 로 돌리고 에이전트만 재기동(토큰은 `gateway.json` 에 남아 있어 Bearer 200 유지, health `relay.connected=false`). Fly 배포 후에는 `SIOT_RELAY_URL=`(비움) 으로 바꾸고 백엔드에 같은 pubKey 로 다시 provision·claim 해야 한다(로컬 DB 의 바인딩은 Fly 와 무관).
+
+### 발견 사항 (코드 수정 없음)
+1. **RTC 없는 재부팅 + 인터넷 없음 → 시각이 약 5.5분 뒤처진 채 기동.** 커널 1970 → `/var/lib/systemd/timesync/clock`(22:28:27) 로 올림 → NTP 동기(22:34:29) 전까지 docker 로그·health·snapshot 의 시각이 과거. 재부팅 직후 백엔드로 간 resync `device.state_changed` 3건의 `fromGatewayAt` 이 **+331초** 로 찍힘(5c-1 과 같은 원인, 이번엔 파트너 지연 지표에 그대로 노출). 대책 후보: RTC 배터리, 또는 에이전트가 NTP 동기 전(`timedatectl` NTPSynchronized=no) 이벤트의 `at` 을 신뢰하지 않게 표시.
+2. `install.sh` 의 `docker compose build --quiet agent` 가 (tar 복사로 mtime 이 바뀌어) **새 이미지 ID** 를 만들었지만 이어지는 `docker compose up -d` 는 실행 중인 agent 컨테이너를 재생성하지 않았다(`Container gateway-agent Running`). 소스가 같아 영향은 없었고, 다음 `up -d` 에서 새 이미지로 재생성됨(릴레이 off 로 되돌릴 때 확인). 빌드 뒤 반드시 적용하려면 `up -d --force-recreate agent` 또는 `build` 와 `up` 을 한 줄(`up -d --build agent`)로.
+3. 재부팅 전후 24시간 로그: matterjs-server 가 10-20 21:36·21:51 UTC 에 플러그(@1:5)를 "offline grace period expired" 로 unavailable 처리 → `Failed to probe reachability … resubscribe with new session` → 수십 초 뒤 복귀. 제어·이벤트엔 영향 없었으나 플러그 Thread 링크가 간헐적으로 끊긴다는 신호(RSSI −58~−75, 라우터 역할). 위치/간섭(5b 의 2.4G 수신기) 재확인 가치 있음.
+4. 재부팅 후 센서(MYGGBETT)는 처음엔 OTBR 리더의 자식(`child table` 0xe801, RSSI −52)으로 붙었다가 다시 플러그 라우터 경유로 옮겨 감(5c-2 와 동일). 이벤트 전달 정상.
+5. `docker compose up -d` 로 relay URL 만 바꿔도 agent 컨테이너가 재생성되어 `bootId` 가 바뀐다(백엔드는 resync 로 처리). 운영에서 `.env` 변경은 재부팅과 같은 비용으로 볼 것.
+6. 플러그 제어 20건 중 1건 5.9초 지연은 5b·5c 와 같은 빈도(약 1/20). C3 ①(100회, ≤3초 99회 이상) 측정 시 이 비율이면 통과 경계이므로 실제 100회 측정이 필요하다(배포 후 `tools/slo/control-100.ts`).
+
+### 미검증·남은 것
+- `ExecStop=stop`(정상 종료 시 컨테이너 보존): 이번 재부팅은 전원 차단이라 ExecStop 이 실행되지 않았다. 터미널 탭에서 `sudo systemctl stop matter-gateway && docker ps -a`(3개 Exited 로 남아야 함) → `sudo systemctl start matter-gateway` 로 1회 확인 권장. 전원 차단 경로에서는 docker 의 `unless-stopped` 가 부팅 때 먼저 올리고 compose 는 `Running` 만 확인했다.
+- C3 ①·②(플러그 100회·같은 명령 10회), 인터넷 차단 상태를 **길게 유지한** 재부팅(이번엔 WAN 복구가 부팅 30초 뒤), Fly 배포 후의 C3 ③ 재측정(인터넷 경유 443).
+- 임시 파일: Pi `~/m1-sudo.sh`, `~/c3-cycle.sh`, `~/c3-cycle.log`, `~/plug-check.py`, `~/plug-check-*.log`, `~/door-sse.log`, `~/pre-reboot.txt`, `~/images-{before,after}.txt`, `~/.gw-token`(3001 Bearer, 0600), `~/backup-m1-20261021-0101/`. Mac 로컬 DB(`siot_dev`)에 Pi GW 행·세대·기사 계정·API 키·웹훅이 남아 있다.
