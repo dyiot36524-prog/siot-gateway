@@ -182,3 +182,17 @@ main 의 M1 커밋(e304215·597abf0·d789eff·469fd58)을 Pi 에 반영하고 �
   - **한계(설계대로):** 링버퍼는 메모리, 부팅당 1,000건(`relay.js RING_SIZE`). 에이전트 재시작·정전이면 버퍼가 사라지고 백엔드는 snapshot 차이로 `resync` 이벤트만 합성한다(이번 재부팅 뒤 `kind=resync` 2건 확인). 1,000건을 넘으면 오래된 것부터 버린다. 그리고 **지금 Pi 는 `SIOT_RELAY_URL=off`** 라 어떤 백엔드로도 보내지 않는다 — Fly 배포 후 URL 을 비우고 provision·claim 해야 재전송이 의미를 가진다.
 - 검증 뒤 `.env` 는 다시 `SIOT_RELAY_URL=off`, 에이전트 재기동. Mac API·partner-sim 종료.
 - **(발견, 2026-10-22 00:55) Pi 의 유선 LAN 케이블을 뽑으면 로컬 자동화가 멈춘다.** 공유기 WAN(인터넷)만 뽑은 00:42 시험은 11/11 발동했지만, Pi 의 eth0 케이블을 뽑은 00:54:54~00:57:11 구간에는 도어 이벤트가 하나도 들어오지 않았고 플러그 구독도 1m47s 뒤 만료됐다(Pi→플러그 probe 는 성공, 기기→Pi 방향만 끊김). 케이블 복구 뒤 첫 제어 1건이 10초 타임아웃, 이후 정상. 원인 후보: OTBR 이 인프라 인터페이스(eth0) 다운 시 OMR 프리픽스/경로를 거두거나, 기기가 알고 있는 컨트롤러 주소가 eth0 쪽이라 회신 불가. 세대 요구사항은 "인터넷 없이 동작"이지 "공유기·스위치 없이 동작"이 아니므로 M1 에선 **Pi 는 공유기(LAN)에 항상 유선 연결** 로 운영. 공유기 전원 차단까지 버티는 것은 계획 D4(ii) 범위라 그때 OTBR `OT_INFRA_IF`/주소 선택을 손본다. 센서 쪽 구독은 최대 30분(구독 max 30m) 뒤에야 재설정되므로 케이블 복구 직후 바로 쓰려면 `docker compose restart matter`.
+
+### 9c. 공유기 없이 동작 — 원인 확정과 수정 (2026-10-22 01:00~09:15 KST)
+**증상.** Pi 의 LAN 케이블을 뽑으면(공유기 WAN 이 아니라 Pi 쪽 eth0 링크 다운) 도어센서→Pi 보고가 끊겨 로컬 자동화가 멈추고, 센서는 보고 실패 몇 분 뒤 스스로 재부팅(bootReason=1)했다. Pi→기기 요청은 성공했다.
+
+**조사.** `ip link set eth0 down` 으로 내린 재현(4회)은 모두 정상(도어 36/36)이었고, 실제 케이블 분리(3회)는 매번 센서가 끊겼다. `tcpdump -i wpan0` 캡처에서 센서가 Pi 로 보낸 첫 패킷의 목적지가 **Pi 의 eth0 IPv6 주소(fd54:…, 공유기 RA 로 받은 ULA)** 였다. matter.js 가 `PRIMARY_INTERFACE=eth0` 로 자기 운영 레코드를 광고하고 OTBR 이 같은 인터페이스(`OT_INFRA_IF=eth0`)에서 DNS-SD 프록시를 돌리므로, Thread 기기가 컨트롤러를 다시 찾을 때(기기 주도 CASE 재개·구독 보고) 유선 주소를 받는다. 케이블이 빠지면 그 주소가 사라져 기기→Pi 방향만 끊긴다. 세션이 메시로컬 주소에 묶여 있을 때는 멀쩡하므로 재현이 들쭉날쭉했다(플러그는 메시로컬 세션이라 대부분 정상). 소프트웨어 다운이 통과한 것도 그때 센서 세션이 메시로컬이었기 때문.
+
+**수정(한 가지).** OTBR 인프라 인터페이스와 matter.js PRIMARY_INTERFACE 를 항상 살아 있는 더미 인터페이스 **`siot0`** 로 옮겼다.
+- `host/siot-infra.service`(부팅 때 `ip link add siot0 type dummy`, docker 보다 먼저), `host/91-siot-infra.conf`(NetworkManager 비관리 — NM 이 관리하면 IPv6 auto 가 RA 를 기다리다 활성화에 실패함, 실측), `host/99-matter-thread.conf` 에 siot0 accept_ra=2/forwarding=1, `install.sh` 기본 `BACKBONE_IF=siot0`(+ `LAN_IF=eth0` 는 sysctl 용), compose 기본값 siot0.
+- 동작: OTBR 이 siot0 에 자기 on-link prefix(fd9e:…/64) RA 를 보내고 커널 SLAAC 가 Pi 에 `fd9e:…` 주소를 붙인다. OTBR `br state` 는 케이블이 빠져도 **running** 유지(인프라 링크가 항상 UP), OMR prefix 도 유지. matter.js 는 siot0 의 fd9e 주소로 광고(IPv4 없음 경고는 무해).
+- eth0 는 그대로 LAN(ssh·릴레이·`_siot._tcp` 광고). LAN 의 다른 장치가 Thread 기기에 직접 라우팅하는 기능은 사라지지만 설계상 모든 접근이 에이전트를 거치므로 쓰지 않는다. IP 기반(Wi-Fi/유선) Matter 기기 커미셔닝이 필요해지면 `BACKBONE_IF=eth0` 로 되돌리거나 브리지(eth0+더미)로 바꿔야 한다.
+
+**검증(09:06~09:07 케이블 실제 분리, 자석 10초 간격).** 분리 중 도어 이벤트 34건 전부 도착·규칙 34회 발동·플러그 동작, `br state running` 유지, 복구 후 센서 재부팅 없음. 플러그 양방향도 정상.
+
+**운영 메모.** Pi 의 `.env` 는 `BACKBONE_IF=siot0`. 되돌리기: `BACKBONE_IF=eth0` → `docker compose up -d`, `sudo systemctl disable --now siot-infra`. Pi 임시 파일: `~/eth0-down-probe.sh|.log`, `~/unplug-monitor.sh|.log`, `~/sse-logger.sh`, `~/rule-sse.log`, `~/wpan0.pcap`(센서 패킷 캡처), `~/m1-dummy-if.sh|.log`. 센서 펌웨어 1.0.9 → DCL 에 1.1.4 OTA 가 있다고 matterjs-server 가 알림(미적용).

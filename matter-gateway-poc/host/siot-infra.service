@@ -1,0 +1,18 @@
+# /etc/systemd/system/siot-infra.service — install.sh 가 설치한다.
+# OTBR 의 인프라 인터페이스(OT_INFRA_IF)와 matter.js 의 PRIMARY_INTERFACE 를 유선 eth0 대신 항상 살아 있는
+# 더미 인터페이스 siot0 에 둔다. 그래야 Thread 기기가 기억하는 Pi(컨트롤러)의 IPv6 주소가 LAN 케이블·공유기와 무관해져
+# 공유기 없이도 센서→Pi 보고와 로컬 자동화가 유지된다(HANDOFF §9c: 유선 주소를 쓰던 센서가 케이블 분리 시 끊기던 문제).
+# siot0 는 NetworkManager 비관리(host/91-siot-infra.conf). 주소는 커널 SLAAC 가 OTBR 의 RA 로 받는다(sysctl accept_ra=2).
+[Unit]
+Description=Siot always-up infra interface (siot0) for OTBR/Matter
+Before=docker.service matter-gateway.service
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'ip link show siot0 >/dev/null 2>&1 || ip link add siot0 type dummy; ip link set siot0 up; sysctl --system >/dev/null'
+ExecStop=/sbin/ip link delete siot0
+
+[Install]
+WantedBy=multi-user.target

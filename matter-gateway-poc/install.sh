@@ -24,7 +24,10 @@ TARGET=/opt/matter-gateway
 REPO_URL="${REPO_URL:-https://github.com/dyiot36524-prog/siot-gateway.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 SUBDIR=matter-gateway-poc
-BACKBONE_IF="${BACKBONE_IF:-eth0}"
+# OTBR 인프라 인터페이스 = matter.js PRIMARY_INTERFACE. 기본 siot0(항상 살아 있는 더미, host/siot-infra.service) — 공유기·LAN 케이블 없이도
+# Thread 기기가 기억하는 Pi 주소가 유지된다(HANDOFF §9c). LAN_IF 는 ssh·릴레이용 유선(accept_ra 설정에만 쓴다)
+BACKBONE_IF="${BACKBONE_IF:-siot0}"
+LAN_IF="${LAN_IF:-eth0}"
 
 log() { echo -e "\e[1;32m[install]\e[0m $*"; }
 die() { echo -e "\e[1;31m[install] $*\e[0m" >&2; exit 1; }
@@ -74,10 +77,15 @@ if [ -f rules.json ] && [ ! -f data/agent/rules.json ]; then cp rules.json data/
 
 # ── 4. 커널/네트워크 설정 ────────────────────────────────────────────────
 log "sysctl / systemd 설정"
-sed "s/eth0/$BACKBONE_IF/g" host/99-matter-thread.conf > /etc/sysctl.d/99-matter-thread.conf
+sed "s/eth0/$LAN_IF/g" host/99-matter-thread.conf > /etc/sysctl.d/99-matter-thread.conf
 cp host/ipv6-forwarding-fix.service /etc/systemd/system/ipv6-forwarding-fix.service
 cp host/ble-conn-params.service /etc/systemd/system/ble-conn-params.service   # BLE supervision timeout 2초 (host/ble-conn-params.service 참고)
 sed "s#/opt/matter-gateway#$TARGET#g" host/matter-gateway.service > /etc/systemd/system/matter-gateway.service
+# 더미 인프라 인터페이스 siot0: NM 비관리 + systemd 유닛(부팅 때 생성). BACKBONE_IF 를 실제 NIC 로 바꾸면 만들지 않는다
+if [ "$BACKBONE_IF" = siot0 ]; then
+  [ -d /etc/NetworkManager/conf.d ] && cp host/91-siot-infra.conf /etc/NetworkManager/conf.d/91-siot-infra.conf
+  cp host/siot-infra.service /etc/systemd/system/siot-infra.service
+fi
 # NetworkManager 가 accept_ra 를 덮어쓰는 문제 보정
 if [ -d /etc/NetworkManager/conf.d ]; then
   cat > /etc/NetworkManager/conf.d/90-matter-ipv6.conf <<NM
@@ -88,6 +96,11 @@ fi
 sysctl --system >/dev/null
 systemctl daemon-reload
 systemctl enable ipv6-forwarding-fix.service >/dev/null
+if [ "$BACKBONE_IF" = siot0 ]; then
+  (nmcli general reload conf >/dev/null 2>&1 || true)
+  systemctl enable --now siot-infra.service >/dev/null
+  log "인프라 인터페이스 siot0: $(ip -br link show siot0 2>/dev/null | awk '{print $2}')"
+fi
 systemctl enable --now ble-conn-params.service >/dev/null || true
 
 # ── 5. ZBT-2 장치 경로 ───────────────────────────────────────────────────

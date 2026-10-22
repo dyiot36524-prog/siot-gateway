@@ -18,7 +18,8 @@ services:
     #       포워딩/accept_ra 는 host/99-matter-thread.conf(호스트 sysctl) 에서 설정한다.
     environment:
       OT_RCP_DEVICE: "spinel+hdlc+uart:///dev/ttyACM0?uart-baudrate=460800"   # ZBT-2 OpenThread RCP 펌웨어 기본 보율
-      OT_INFRA_IF: ${BACKBONE_IF:-eth0}
+      # 인프라 인터페이스 기본 siot0(더미, host/siot-infra.service): 공유기·LAN 케이블 없이도 Thread 기기가 기억하는 Pi 주소가 유지된다(HANDOFF §9c)
+      OT_INFRA_IF: ${BACKBONE_IF:-siot0}
       OT_THREAD_IF: wpan0
       OT_LOG_LEVEL: "5"
       OT_REST_LISTEN_ADDR: 127.0.0.1
@@ -36,7 +37,7 @@ services:
     depends_on: [otbr]
     environment:
       LOG_LEVEL: info
-      PRIMARY_INTERFACE: ${BACKBONE_IF:-eth0}
+      PRIMARY_INTERFACE: ${BACKBONE_IF:-siot0}   # OTBR 인프라 인터페이스와 같아야 Thread 기기가 Pi 를 이 인터페이스 주소로 찾는다
       LISTEN_ADDRESS: 127.0.0.1          # 에이전트만 접근. 대시보드 보려면 ,${BACKBONE_IF} 추가
       PRODUCTION_MODE: "true"
       VENDOR_ID: "65521"                 # 테스트 VID 0xFFF1. 반드시 10진수! (matter-server 1.4.0 은 parseInt(v,10) 이라 "0xfff1" → 0 이 되어
@@ -122,7 +123,7 @@ services:
       MATTER_BACKEND: embedded
       MATTER_BLE: "1"
       MATTER_BLE_HCI: "0"
-      MATTER_INTERFACE: ${BACKBONE_IF:-eth0}
+      MATTER_INTERFACE: ${BACKBONE_IF:-siot0}
       MATTER_VENDOR_ID: "65521"      # 0xFFF1 테스트 VID
       OTBR_REST_URL: http://127.0.0.1:8081
       RULES_FILE: /app/data/rules.json
