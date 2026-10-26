@@ -60,6 +60,8 @@ tags:
     description: 게이트웨이
   - name: devices
     description: 기기 조회·제어
+  - name: automations
+    description: 세대 자동화 규칙(게이트웨이 로컬 실행)
   - name: webhooks
     description: 웹훅 구독 관리
 paths:
@@ -173,6 +175,71 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+  /v1/sites/{siteId}/automations:
+    get:
+      tags: [automations]
+      operationId: getSiteAutomations
+      summary: 세대 자동화 규칙 조회
+      description: |
+        세대에 저장된 규칙 전체와 게이트웨이별 적용 상태. 저장된 규칙이 없으면 `version: 0, rules: [], updatedAt: null`.
+        `gateways[].appliedVersion >= version` 이면 그 게이트웨이에 들어간 것이다.
+      x-required-scope: devices:read
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/SiteId"
+      responses:
+        "200":
+          description: 세대 규칙
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationSet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+    put:
+      tags: [automations]
+      operationId: putSiteAutomations
+      summary: 세대 자동화 규칙 전체 교체
+      description: |
+        세대 규칙 **전체 교체**(멱등). 규칙 0개도 허용(전부 삭제). 저장마다 `version` 이 1 늘고, 응답은 GET 과 같은 본문이다.
+        `id` 가 없는 규칙은 서버가 `aut_`+ULID 를 발급하고, 있으면 유지한다. 규칙 최대 100개, 규칙당 조건·액션 최대 10개.
+        저장 후 각 게이트웨이에 그 게이트웨이 기기만으로 된 규칙을 보낸다(연결 중이면 즉시, 아니면 다음 접속 때). 응답은 전달을 기다리지 않는다.
+        규칙은 게이트웨이에서 로컬로 실행되므로 인터넷이 끊겨도 동작한다.
+
+        400 코드: `VALIDATION_FAILED`(메시지에 `rules[i].…` 경로, 기기에 없는 field 포함), `UNKNOWN_DEVICE`(세대 밖·다른 조직·제거된 기기),
+        `CROSS_GATEWAY_NOT_SUPPORTED`(한 규칙의 기기가 두 게이트웨이 이상에 걸침).
+      x-required-scope: devices:control
+      parameters:
+        - $ref: "#/components/parameters/ApiVersion"
+        - $ref: "#/components/parameters/SiteId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AutomationsPutRequest" }
+            example:
+              rules:
+                - name: 문 열리면 플러그 켜기
+                  trigger: { type: device, deviceId: dev_01JZ8Q0V4Y4W6P1M2N3B5C7D9E, field: active, changedTo: true }
+                  actions: [{ type: command, deviceId: dev_01JZ8Q0V4Y4W6P1M2N3B5C7D9F, action: "ON" }]
+                - name: 밤 10시 플러그 끄기
+                  trigger: { type: schedule, at: "22:00" }
+                  actions: [{ type: command, deviceId: dev_01JZ8Q0V4Y4W6P1M2N3B5C7D9F, action: "OFF" }]
+      responses:
+        "200":
+          description: 저장된 세대 규칙(version +1)
+          headers:
+            Siot-Api-Version: { $ref: "#/components/headers/SiotApiVersion" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AutomationSet" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
   /v1/gateways/{gatewayId}:
     get:
@@ -574,6 +641,10 @@ components:
         agentVersion: { type: [string, "null"] }
         matterServerVersion: { type: [string, "null"] }
         deviceCount: { type: integer, minimum: 0 }
+        rulesVersion:
+          type: integer
+          minimum: 0
+          description: 게이트웨이가 마지막으로 적용을 보고한 세대 자동화 규칙 version. 조회 API 응답에는 항상 있고 웹훅 페이로드에는 없을 수 있다
     DeviceType:
       type: string
       enum: [PLUG, SWITCH, LIGHT, SENSOR, BINARY_SENSOR, COVER, CLIMATE, FAN, LOCK, WEATHER, UNKNOWN]
@@ -623,6 +694,135 @@ components:
     EventType:
       type: string
       enum: [device.state_changed, device.removed, gateway.online, gateway.offline, api_key.expiring]
+    AutomationRuleId: { type: string, pattern: "^aut_[0-9A-HJKMNP-TV-Z]{26}$", example: aut_01JZ8Q0V4Y4W6P1M2N3B5C7D9E }
+    AutomationField:
+      type: string
+      enum: [switch, active, battery, batteryLow, power, energy, brightness, value]
+      description: |
+        공개 `Device.data` 의 키. 기기의 `data` 에 없는 field 는 400 `VALIDATION_FAILED`.
+        `switch`·`active`·`batteryLow` 는 boolean, 나머지는 number 값과 비교한다. `active` 는 문열림(door)·움직임(motion) 감지 = true.
+    AutomationValue: { type: [boolean, number] }
+    AutomationDeviceTrigger:
+      type: object
+      description: 기기 값 변화. `changedTo`(이전 값과 달라져 이 값이 될 때) 또는 `equals`(값이 이것으로 보고될 때) 중 정확히 하나.
+      required: [type, deviceId, field]
+      additionalProperties: false
+      properties:
+        type: { const: device }
+        deviceId: { $ref: "#/components/schemas/DeviceId" }
+        field: { $ref: "#/components/schemas/AutomationField" }
+        changedTo: { $ref: "#/components/schemas/AutomationValue" }
+        equals: { $ref: "#/components/schemas/AutomationValue" }
+      oneOf:
+        - { required: [changedTo], properties: { changedTo: true } }
+        - { required: [equals], properties: { equals: true } }
+    AutomationScheduleTrigger:
+      type: object
+      description: 매일(또는 `days` 요일) `tz` 기준 `at` 시각. 게이트웨이 시계가 동기되지 않은 동안은 발동하지 않고, 밀린 시각은 나중에 실행하지 않는다.
+      required: [type, at]
+      additionalProperties: false
+      properties:
+        type: { const: schedule }
+        at: { type: string, pattern: "^([01]\\d|2[0-3]):[0-5]\\d$", example: "22:00" }
+        days:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          description: 생략하면 매일
+          items: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] }
+        tz: { type: string, description: IANA 시간대. 생략하면 Asia/Seoul, example: Asia/Seoul }
+    AutomationTrigger:
+      oneOf:
+        - $ref: "#/components/schemas/AutomationDeviceTrigger"
+        - $ref: "#/components/schemas/AutomationScheduleTrigger"
+      discriminator:
+        propertyName: type
+        mapping:
+          device: "#/components/schemas/AutomationDeviceTrigger"
+          schedule: "#/components/schemas/AutomationScheduleTrigger"
+    AutomationCondition:
+      type: object
+      description: 발동 시점의 기기 값 검사(모두 참이어야 실행). `equals`·`gt`·`lt` 중 정확히 하나. `gt`·`lt` 는 number field 만.
+      required: [deviceId, field]
+      additionalProperties: false
+      properties:
+        deviceId: { $ref: "#/components/schemas/DeviceId" }
+        field: { $ref: "#/components/schemas/AutomationField" }
+        equals: { $ref: "#/components/schemas/AutomationValue" }
+        gt: { type: number }
+        lt: { type: number }
+      oneOf:
+        - required: [equals]
+        - required: [gt]
+        - required: [lt]
+    AutomationCommandAction:
+      type: object
+      description: 기기 켜기/끄기/토글. 대상은 `switch` 가 있는 기기(PLUG·SWITCH·LIGHT·FAN)
+      required: [type, deviceId, action]
+      additionalProperties: false
+      properties:
+        type: { const: command }
+        deviceId: { $ref: "#/components/schemas/DeviceId" }
+        action: { type: string, enum: [ON, OFF, TOGGLE] }
+    AutomationDelayAction:
+      type: object
+      description: 다음 액션 전 대기
+      required: [type, ms]
+      additionalProperties: false
+      properties:
+        type: { const: delay }
+        ms: { type: integer, minimum: 0, maximum: 3600000 }
+    AutomationAction:
+      oneOf:
+        - $ref: "#/components/schemas/AutomationCommandAction"
+        - $ref: "#/components/schemas/AutomationDelayAction"
+      discriminator:
+        propertyName: type
+        mapping:
+          command: "#/components/schemas/AutomationCommandAction"
+          delay: "#/components/schemas/AutomationDelayAction"
+    AutomationRule:
+      type: object
+      description: 세대 자동화 규칙. 한 규칙의 기기는 모두 같은 게이트웨이에 있어야 한다.
+      required: [trigger, actions]
+      additionalProperties: false
+      properties:
+        id:
+          allOf: [{ $ref: "#/components/schemas/AutomationRuleId" }]
+          description: 요청에서는 선택(없으면 서버가 발급, 있으면 유지). 응답에는 항상 있다
+        name: { type: string, minLength: 1, maxLength: 100 }
+        enabled: { type: boolean, default: true }
+        trigger: { $ref: "#/components/schemas/AutomationTrigger" }
+        conditions: { type: array, maxItems: 10, default: [], items: { $ref: "#/components/schemas/AutomationCondition" } }
+        actions: { type: array, minItems: 1, maxItems: 10, items: { $ref: "#/components/schemas/AutomationAction" } }
+    AutomationsPutRequest:
+      type: object
+      required: [rules]
+      additionalProperties: false
+      properties:
+        rules: { type: array, maxItems: 100, items: { $ref: "#/components/schemas/AutomationRule" } }
+    AutomationSet:
+      type: object
+      required: [version, updatedAt, rules, gateways]
+      properties:
+        version: { type: integer, minimum: 0, description: 세대 규칙 버전(저장마다 +1). 저장된 적 없으면 0 }
+        updatedAt: { type: [string, "null"], format: date-time }
+        rules:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/AutomationRule"
+              - required: [id, enabled, conditions]
+        gateways:
+          type: array
+          description: 세대의 게이트웨이별 적용 상태
+          items:
+            type: object
+            required: [gatewayId, online, appliedVersion]
+            properties:
+              gatewayId: { $ref: "#/components/schemas/GatewayId" }
+              online: { type: boolean }
+              appliedVersion: { type: integer, minimum: 0, description: 게이트웨이가 마지막으로 적용을 보고한 version(cfg_ack.rulesVersion) }
     Webhook:
       type: object
       required: [webhookId, url, events, createdAt, disabledAt]

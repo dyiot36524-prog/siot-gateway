@@ -2,7 +2,9 @@
 import { and, asc, count, eq, gt, isNull, ne, or, sql } from 'drizzle-orm';
 import type { CfgAckFrame, HelloFrame } from '@siot/protocol';
 import type { Db } from '../db/client.js';
-import { auditLog, gateways, siteKeys } from '../db/schema.js';
+import { auditLog, automationRules, gateways, siteKeys } from '../db/schema.js';
+import { compileForGateway, type AutomationRule } from '../automations/compile.js';
+import { loadRuleDevices } from '../automations/service.js';
 import { decryptSecret } from './crypto.js';
 import type { CfgBody, GatewayRecord, GatewayRepo } from './deps.js';
 
@@ -14,7 +16,7 @@ type Q = Pick<Db, 'select' | 'insert' | 'update'>;
 
 /**
  * gatewayId 의 현재 cfgVersion cfg. M1: keys = 세대의 유효 키(retired 아님 또는 유예 중), peers = 같은 세대 다른 GW(lan [] / mleid null),
- * rules = {version:0, rules:[]}, thread 없음.
+ * rules = {version: 세대 규칙 version, rules: 이 GW 기기만으로 된 규칙(컴파일)} — 규칙이 없어도 같은 version 의 빈 배열(지운 규칙이 남지 않게), thread 없음.
  */
 export async function buildCfgBody(q: Q, dataEncKey: string, gatewayId: string, now = new Date()): Promise<CfgBody | null> {
   const [gw] = await q.select({ siteId: gateways.siteId, cfgVersion: gateways.cfgVersion }).from(gateways).where(eq(gateways.gatewayId, gatewayId));
@@ -31,12 +33,14 @@ export async function buildCfgBody(q: Q, dataEncKey: string, gatewayId: string, 
     .from(gateways)
     .where(and(eq(gateways.siteId, gw.siteId), ne(gateways.gatewayId, gatewayId)))
     .orderBy(asc(gateways.gatewayId));
+  const [ar] = await q.select({ version: automationRules.version, rules: automationRules.rules }).from(automationRules).where(eq(automationRules.siteId, gw.siteId));
+  const rules = ar?.rules.length ? compileForGateway(ar.rules as AutomationRule[], await loadRuleDevices(q, gw.siteId), gatewayId) : [];
   return {
     cfgVersion: gw.cfgVersion,
     siteId: gw.siteId,
     keys: [first, ...rest],
     peers: peers.map((p) => ({ gatewayId: p.gatewayId, lan: [], mleid: null })),
-    rules: { version: 0, rules: [] },
+    rules: { version: ar?.version ?? 0, rules },
   };
 }
 
@@ -79,6 +83,7 @@ export function createDbGatewayRepo(db: Db, dataEncKey: string): GatewayRepo {
         .set({
           cfgAckedVersion: ack.cfgVersion,
           keyVersion: ack.keyVersion,
+          rulesAckedVersion: ack.rulesVersion,
           status: sql`case when ${gateways.status} = 'site_reset_pending' and ${gateways.cfgVersion} <= ${ack.cfgVersion} then 'bound'::gateway_status else ${gateways.status} end`,
         })
         .where(eq(gateways.gatewayId, gatewayId));

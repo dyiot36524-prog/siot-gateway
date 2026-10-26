@@ -47,8 +47,9 @@ async function main() {
   const pairing = new PairingManager(matter, registry);
   const execute = (cmd) => executeCommand(matter, registry, cmd);
   await ensureRulesFile();
-  const rules = new RulesEngine(registry, execute, { file: config.rulesFile, publish: () => {} });
+  const rules = new RulesEngine(registry, execute, { file: config.rulesFile, clockSyncFile: config.clockSyncFile });
   await rules.load();
+  rules.start();
 
   // ---- 로컬 API (먼저 띄워 Matter 서버가 늦어도 healthz·상태 페이지는 동작) ----
   const api = new PlatformServer({ store, identity, registry, execute, pairing, matter, opts: { mode: config.mode, port: config.port, adminPort: config.localAdminPort, version: config.version } });
@@ -68,6 +69,7 @@ async function main() {
     },
   });
   if (config.mode === 'dev') api.onClaimed = () => relay.reconnectNow();   // dev 로컬 claim → 토큰으로 재접속. 출고는 릴레이 bind 가 처리
+  relay.on('cfg', (cfg) => rules.onCfg(cfg).catch((e) => log.error(`rules replace 실패: ${e.message}`)));   // cfg.rules → 규칙 엔진·rules.json
   const publish = (kind, data) => { try { relay.publish(kind, data); } catch (e) { log.debug(`evt drop: ${e.message}`); } };
 
   wireRelayEvents({ registry, pairing, publish });
@@ -83,7 +85,7 @@ async function main() {
   await relay.start();
 
   // ---- health.json (호스트 OTA 확인 조건) ----
-  const stopHealth = startHealthWriter(config.healthDir, () => ({ bootId: BOOT_ID, version: config.version, engineOnline: engineOnline(), deviceCount: api.listSiotDevices().length, relay: { connected: relay.connected } }));
+  const stopHealth = startHealthWriter(config.healthDir, () => ({ bootId: BOOT_ID, version: config.version, engineOnline: engineOnline(), deviceCount: api.listSiotDevices().length, relay: { connected: relay.connected }, clockSynced: rules.clockOk() }));
 
   // ---- Matter 백엔드 ----
   matter.on('node_added', (n) => registry.upsertNode(n));
@@ -112,7 +114,7 @@ async function main() {
     ? startDatasetSync({ restUrl: config.otbrRestUrl, matter, pairing, onRegistered: (bytes) => publish('thread', { datasetRegistered: true, bytes }) })
     : () => {};
 
-  const shutdown = async () => { log.info('shutting down'); stopSync(); stopMdns(); stopHealth(); relay.stop(); await api.close(); matter.close?.(); process.exit(0); };
+  const shutdown = async () => { log.info('shutting down'); stopSync(); stopMdns(); stopHealth(); rules.stop(); relay.stop(); await api.close(); matter.close?.(); process.exit(0); };
   process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
 }
 

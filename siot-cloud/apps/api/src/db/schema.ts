@@ -1,6 +1,6 @@
-// M1 테이블 13개 (계획 §3 B1, Step 1-1). 공유 계약 — 변경은 추가(additive)만, README 변경 로그에 기록.
-// ID 규칙: <prefix>_<ULID> (org_, usr_, site_, dev_, evt_, key_, wh_, whd_, pair_), gatewayId 는 GW 가 정한 gw_<uuid>.
-// M2(invitations, handover_cards, automation_rules, thread_networks), M4(ota_*, alerts, gateway_logs)는 여기 없다.
+// M1 테이블 14개 (계획 §3 B1, Step 1-1 + automation_rules 당김). 공유 계약 — 변경은 추가(additive)만, README 변경 로그에 기록.
+// ID 규칙: <prefix>_<ULID> (org_, usr_, site_, dev_, evt_, key_, wh_, whd_, pair_, aut_), gatewayId 는 GW 가 정한 gw_<uuid>.
+// M2(invitations, handover_cards, thread_networks), M4(ota_*, alerts, gateway_logs)는 여기 없다.
 import { sql } from 'drizzle-orm';
 import {
   bigint,
@@ -119,6 +119,8 @@ export const gateways = pgTable(
     cfgVersion: integer('cfg_version').notNull().default(0),
     /** GW 가 마지막으로 cfg_ack/hello 로 보고한 버전 */
     cfgAckedVersion: integer('cfg_acked_version').notNull().default(0),
+    /** GW 가 마지막 cfg_ack.rulesVersion 으로 보고한 세대 규칙 버전(공개 rulesVersion·appliedVersion) */
+    rulesAckedVersion: integer('rules_acked_version').notNull().default(0),
     keyVersion: integer('key_version').notNull().default(0),
     /** 초기화 후 24h claim 창. null 이면 창 제한 없음(출고 직후 첫 claim) */
     claimWindowUntil: tz('claim_window_until'),
@@ -275,6 +277,15 @@ export const pairingSessions = pgTable(
   (t) => [index('pairing_sessions_gateway_status_idx').on(t.gatewayId, t.status, t.createdAt)],
 );
 
+/** 세대 자동화 규칙(공개 AutomationRule 형식 그대로, id 포함). 저장마다 version +1, GW 별 컴파일은 cfg 생성 때 */
+export const automationRules = pgTable('automation_rules', {
+  siteId: text('site_id').primaryKey().references(() => sites.siteId),
+  orgId: text('org_id').notNull(),
+  version: integer('version').notNull().default(0),
+  rules: jsonb('rules').$type<unknown[]>().notNull().default([]),
+  updatedAt: tz('updated_at').notNull().defaultNow(),
+});
+
 export const auditLog = pgTable(
   'audit_log',
   {
@@ -308,4 +319,5 @@ export const M1_TABLES = [
   'webhook_deliveries',
   'pairing_sessions',
   'audit_log',
+  'automation_rules',
 ] as const;

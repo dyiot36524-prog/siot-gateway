@@ -52,21 +52,26 @@
 ```
 
 ## 로컬 규칙
+파일 `/app/data/rules.json` = `{ "version": 3, "rules": [ … ] }`. `version` 없음/0 = 손으로 쓴 로컬 규칙, ≥1 = 플랫폼이 relay-v2 `cfg.rules {version, rules[]}` 로 내려보낸 것(스키마 `relay-v2.json` `$defs.Rule`).
 ```jsonc
 {
-  "id": "door-open-turns-plug-on",
+  "id": "aut_01…",
+  "name": "문 열리면 플러그 켜기",   // 선택
   "enabled": true,
-  "trigger":    { "deviceId": "matter:7", "capability": "contact", "field": "open", "changedTo": true },   // 또는 "equals"
+  "trigger":                                                     // type 생략 = device(옛 규칙 호환)
+      { "type": "device", "deviceId": "matter:7", "endpoint": 1, "capability": "contact", "field": "open", "changedTo": true }   // 또는 "equals"
+    | { "type": "schedule", "at": "22:00", "days": ["mon","tue"], "tz": "Asia/Seoul" },   // days 생략 = 매일, tz 생략 = Asia/Seoul
   "conditions": [ { "deviceId": "matter:12", "capability": "onoff", "field": "on", "equals": false } ],    // equals | gt | lt
   "actions": [
     { "type": "command", "deviceId": "matter:12", "capability": "onoff", "action": "on" },
-    { "type": "delay", "ms": 5000 },
-    { "type": "mqtt", "topic": "events/door", "payload": { "msg": "opened" } }
+    { "type": "delay", "ms": 5000 }
   ]
 }
 ```
-클라우드는 `gw/<id>/rules/set` 로 규칙 전체를 내려보내고, 게이트웨이는 data/rules.json 에 저장해 오프라인에서도 실행한다.
-> 2026-10 갱신: MQTT 토픽은 **WebSocket 릴레이로 대체**되었다. 규칙은 relay-v2 `cfg.rules {version, rules[]}` 로 내려오고 `cfg_ack.rulesVersion` 으로 확인한다(`docs/relay-protocol.md`). M1 에이전트는 cfg 를 `data/agent/site.json` 에 저장·ack 만 하고, 규칙 엔진 반영은 Step 5 에서 붙인다. 로컬 규칙 파일은 `/app/data/rules.json`.
+- **적용**: 에이전트는 `cfg` 를 받으면 `rules.json` 을 원자적으로 교체하고 `rules installed v<N>` 을 남긴다. 같거나 낮은 version 재전송은 무시(멱등), `version 0 + 빈 배열`(플랫폼이 아직 안 보냄)은 손으로 쓴 규칙을 지우지 않도록 무시. 확인은 `cfg_ack.rulesVersion`.
+- **schedule**: 30초 틱, 규칙의 tz 기준 `YYYY-MM-DD HH:MM` 키로 분당 1회. `days` 도 tz 기준 요일.
+- **시계 게이트**: Pi 는 RTC 가 없어 NTP 동기 전 시계가 틀리다. `SIOT_CLOCK_SYNC_FILE`(compose: `/host/systemd/timesync/synchronized` ← 호스트 `/run/systemd`(timesyncd 재시작 시 하위 디렉터리가 재생성되므로 상위를 마운트))이 생길 때까지 schedule 규칙은 보류(WARN 1회), 동기 후 밀린 분은 실행하지 않는다. 상태는 `health.json` 의 `clockSynced`. device 트리거는 영향 없음.
+- 옛 `mqtt` 액션은 무시한다(오류 아님). 클라우드 단절 중에도 저장된 규칙으로 계속 동작한다.
 
 ## 다음 단계
 - Zigbee 소스: zigpy 또는 Zigbee2MQTT → 같은 capability 로 매핑하는 어댑터 추가 (id 접두어 `zigbee:`)

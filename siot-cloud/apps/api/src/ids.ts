@@ -3,7 +3,7 @@ import { monotonicFactory } from 'ulid';
 
 const ulid = monotonicFactory();
 
-export type IdPrefix = 'org' | 'usr' | 'site' | 'dev' | 'evt' | 'key' | 'wh' | 'whd' | 'pair';
+export type IdPrefix = 'org' | 'usr' | 'site' | 'dev' | 'evt' | 'key' | 'wh' | 'whd' | 'pair' | 'aut';
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${ulid()}`;
@@ -18,6 +18,7 @@ export const ID_PATTERNS = {
   evt: new RegExp(`^evt_${ULID}$`),
   wh: new RegExp(`^wh_${ULID}$`),
   pair: new RegExp(`^pair_${ULID}$`),
+  aut: new RegExp(`^aut_${ULID}$`),
   gateway: /^gw_[0-9a-f-]{36}$/,
 } as const;
 

@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { once } from 'node:events';
+import { once, EventEmitter } from 'node:events';
 import { createPublicKey, verify, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -18,6 +18,7 @@ import { normalizeNode } from '../src/model/normalize.js';
 import { toSiotDevices } from '../src/platform/siotMapper.js';
 import { SIM_PLUG } from '../src/matterSim.js';
 import { RelayAgent, EventRing, backoffDelay, frames, RING_SIZE, BACKOFF } from '../src/platform/relay.js';
+import { RulesEngine } from '../src/rules.js';
 
 const GW = 'gw_0e1a0001-aaaa-bbbb-cccc-ddddeeeeffff';
 const b64 = (s) => Buffer.from(s).toString('base64');
@@ -149,6 +150,8 @@ test('frame builders emit exactly the §2 b fields', () => {
 test('round trip: unbound connect → hello sig → welcome → snapshot+replay → bind → token reconnect → cfg → cfg_ack → snapshot → ack → evt → req → ping', async () => {
   const relay = await new FakeRelay().start();
   const agent = makeAgent(relay.url);
+  const rules = new RulesEngine(new EventEmitter(), async () => {}, { file: path.join(dir, 'rules.json') });
+  agent.on('cfg', (cfg) => rules.onCfg(cfg));            // index.js 와 같은 연결
   agent.publish('gateway', { booted: true });           // 접속 전 이벤트 → seq 1, 링버퍼에 남음
   await agent.start();
 
@@ -184,6 +187,8 @@ test('round trip: unbound connect → hello sig → welcome → snapshot+replay 
   send(c2, { t: 'cfg', cfgVersion: 3, siteId: 'site_1', keys: [{ v: 1, key: 'a2V5' }], peers: [], rules: { version: 2, rules: [] } });
   const ack = await waitFrame(c2, 'cfg_ack');
   assert.deepEqual(ack.frame, { t: 'cfg_ack', cfgVersion: 3, keyVersion: 1, rulesVersion: 2 });
+  await rules.saving; assert.equal(rules.version, 2);
+  assert.deepEqual(JSON.parse(await readFile(path.join(dir, 'rules.json'), 'utf8')), { version: 2, rules: [] }, 'cfg.rules → rules.json');
   const s2 = await waitFrame(c2, 'snapshot');
   assert.ok(s2.index > ack.index, 'cfg_ack before snapshot');
   assert.equal(s2.frame.keyVersion, 1);

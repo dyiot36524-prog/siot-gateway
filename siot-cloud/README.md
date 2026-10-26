@@ -55,10 +55,11 @@ relay-v2 인코딩 요약(Step 2 게이트웨이 실행자와 합의):
 - `snapshot = {bootId, seq(마지막 evt seq, 없으면 0), keyVersion, gateway, devices[]}`. evt 보다 항상 먼저.
 - `evt.data`: `device` → `{devices:[SiotDevice…]}`, `device_removed` → `{deviceId?, ids:[localId…]}`, `pairing` → `{sessionId, stage, errorCode?, error?, deviceId?, devices?}`, 나머지 자유 객체. `replayed` 는 재전송일 때만 `true`.
 - `cfg.keys[].key` = 32B base64url(43자). M1 cfg 에는 `thread` 가 없다.
+- `cfg.rules = {version, rules:[Rule…]}`: 세대 자동화 규칙 version(저장마다 +1)과 그 GW 기기만으로 컴파일한 규칙(`$defs/Rule`, 트리거 device|schedule). 규칙이 없는 GW 도 같은 version 의 빈 배열을 받는다. GW 는 적용 후 `cfg_ack.rulesVersion` 으로 보고.
 
 Ajv 로 검증할 때: `Ajv2020({strict:true, allowUnionTypes:true})` + `ajv-formats` + `addKeyword('x-direction')` 후 `allSchemas` 를 전부 `addSchema` (서로 `$id` 로 참조). 방향별 검증은 `SCHEMA_IDS.relayV2ServerToGateway` / `relayV2GatewayToServer`.
 
-ID 형식: `org_`, `usr_`, `site_`, `dev_`, `evt_`, `wh_`, `pair_` + ULID(Crockford 26자). `gatewayId` 는 GW 가 정한 `gw_<uuid>`, `shortId` 는 그 앞 8 hex.
+ID 형식: `org_`, `usr_`, `site_`, `dev_`, `evt_`, `wh_`, `pair_`, `aut_` + ULID(Crockford 26자). `gatewayId` 는 GW 가 정한 `gw_<uuid>`, `shortId` 는 그 앞 8 hex.
 
 ## Step 1 백엔드 구성 (apps/api/src)
 
@@ -100,3 +101,4 @@ ID 형식: `org_`, `usr_`, `site_`, `dev_`, `evt_`, `wh_`, `pair_` + ULID(Crockf
 | 2026-10-21 | apps/api/package.json | `ajv`·`ajv-formats` 를 dependencies 로 이동(릴레이가 런타임에 relay-v2 프레임을 양방향 검증) | Step 2 백엔드 |
 | 2026-10-21 | apps/api/openapi/public-v1.yaml | 응답 코드 추가: `400`(ID 형식·Siot-Api-Version 형식) → sites/{siteId}·gateways/{id}·devices/{id}·webhooks/{id}(DELETE·test), `403`(INSUFFICIENT_SCOPE) → GET /v1/sites·GET/POST /v1/webhooks. 설명에 조직 격리 404 규칙(제거된 자기 기기·삭제된 웹훅·세대 미소속 GW)과 지원 버전 `2026-10-01` 명시 | Step 1 |
 | 2026-10-21 | package.json(workspaces), apps/api/package.json | workspaces 에 `tools/partner-sim`·`tools/slo` 추가. `tsx` 를 dependencies 로 이동(배포 이미지가 tsx 로 실행), `admin` 스크립트 추가 | Step 1 |
+| 2026-10-26 | relay-v2.json(+ generated, fixtures), db/schema.ts, drizzle/0001_automations.sql, public-v1.yaml | 자동화 규칙(M1 당김): `$defs/Rule`(트리거 device\|schedule, conditions, actions command\|delay)로 불투명 `Rules.items` 교체, `valid.cfg-thread.json` 의 자리표시 규칙을 새 형식으로. 테이블 `automation_rules`, `gateways.rules_acked_version`. `GET/PUT /v1/sites/{siteId}/automations`, `Gateway.rulesVersion`(선택), ID `aut_` | 자동화 백엔드 |

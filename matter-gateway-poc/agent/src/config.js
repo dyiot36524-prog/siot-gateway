@@ -19,6 +19,7 @@ export const config = {
   // 에이전트
   rulesFile: process.env.RULES_FILE ?? './rules.json',
   rulesSeedFile: process.env.RULES_SEED_FILE ?? './rules.example.json',   // rulesFile 이 없을 때 최초 1회 복사
+  clockSyncFile: process.env.SIOT_CLOCK_SYNC_FILE || null,   // 있으면 이 파일이 생긴 뒤(NTP 동기)에만 schedule 규칙 발동
   dataDir: process.env.DATA_DIR ?? './data',
   logLevel: process.env.LOG_LEVEL ?? 'info',
 };

@@ -204,3 +204,29 @@ main 의 M1 커밋(e304215·597abf0·d789eff·469fd58)을 Pi 에 반영하고 �
   - 10-21 의 "20회 중 1회 5.9초" 지연은 이번 110회에선 없었다. 경계 케이스였던 1/100 우려는 해소. Fly 배포 후 인터넷 경유로 한 번 더 재는 것은 남음(계획 §7 M1-9).
   - 측정 후 Pi `.env` 는 다시 `SIOT_RELAY_URL=off`.
 - **GHCR 에이전트 이미지.** 태그 `agent-v0.2.0` 푸시 → `.github/workflows/gateway-agent-image.yml`(npm test → OTA manifest → arm64 buildx → GHCR) 실행, 약 2분 만에 성공(run 40337431873). 이미지 `ghcr.io/dyiot36524-prog/siot-gateway-agent:0.2.0`, **digest `sha256:bbb4dad4995b43d187ebe8c7a8182b7a0c9105e428672c852f151f4186057040`**(공개, 익명 pull 가능 — 레지스트리 HEAD 로 확인). `.env AGENT_IMAGE=ghcr.io/dyiot36524-prog/siot-gateway-agent@sha256:bbb4dad4995b43d187ebe8c7a8182b7a0c9105e428672c852f151f4186057040` 로 바꾸고 `docker compose up -d --pull missing` 하면 Pi 가 로컬 빌드 대신 출고 이미지를 쓴다(아직 바꾸지 않음 — 로컬 빌드 유지).
+
+### 9e. 플랫폼 자동화 규칙 → 게이트웨이 로컬 실행 (2026-10-26 23:00~24:00 KST, M3 Step 5 일부를 M1 로 당김)
+플랫폼이 공개 API 로 자동화를 저장하면 백엔드가 게이트웨이별로 컴파일해 relay `cfg.rules` 로 내려보내고, 게이트웨이는 `rules.json` 에 영속해 **인터넷·백엔드 없이** 실행한다. 계약 원문: 세션 노트 `automations-contract.md`(§1 공개 형식, §2 게이트웨이 형식, §3 매핑). 게이트웨이 2대에 걸친 규칙(피어)은 M3 그대로 남김.
+
+**구현(커밋 참조)**
+- 공개 API `GET/PUT /v1/sites/{siteId}/automations`(스코프 read / control), `Gateway.rulesVersion`. 규칙: `trigger` = `device{deviceId(dev_), field, changedTo|equals}` 또는 `schedule{at:"HH:MM", days?, tz?=Asia/Seoul}`, `conditions[]{deviceId, field, equals|gt|lt}`, `actions[]{command{deviceId, ON|OFF|TOGGLE} | delay{ms}}`. 최대 100규칙·10조건·10액션. 오류 400 `VALIDATION_FAILED`(경로 포함) / `UNKNOWN_DEVICE` / `CROSS_GATEWAY_NOT_SUPPORTED`.
+- 백엔드: `automation_rules`(세대당 1행, version, rules jsonb) + `gateways.rules_acked_version`(마이그레이션 `0001_automations.sql`). `src/automations/compile.ts` 가 `dev_`→`(gatewayId, matter:<node>, endpoint)` 와 `field`→`capability.field`(siotMapper 역방향: switch→onoff.on, active→contact.open|motion.detected, battery→battery.percent, power→power.watts, energy→energy.kwh, brightness→level.percent, value→센서 measurement 별) 로 바꾼다. PUT 은 한 트랜잭션에서 version+1, 세대 모든 GW `cfgVersion+1`, 커밋 뒤 접속 중인 GW 에 `cfg` 즉시 push(오프라인이면 다음 접속 때 자동). `cfg_ack.rulesVersion` → `appliedVersion`.
+- 프로토콜: `relay-v2.json` `$defs.Rule`(불투명 객체 → 정식 스키마), fixture 2개 추가.
+- 에이전트: `rules.js` — `{version, rules}` 파일, `replace()` 버전 가드(낮거나 같은 버전·v0+빈 배열 무시), `schedule` 트리거(30초 틱, tz 기준 분당 1회, `days`), **시계 게이트**(`SIOT_CLOCK_SYNC_FILE=/host/systemd/timesync/synchronized`, compose 가 `/run/systemd` 를 ro 마운트; 동기 전엔 schedule 보류·WARN 1회, 밀린 분 미실행; `health.json` `clockSynced`). `index.js` 가 `relay.on('cfg')` → `rules.onCfg()`. `mqtt` 액션 무시.
+- 테스트: protocol 38→43, api 156→186(compile 19·통합 7), 에이전트 82→91(`rules.test.js`). OpenAPI lint 0, typecheck·gen:check 통과.
+
+**실기기 검증(Mac 로컬 백엔드 8090 + Pi)**
+| 장면 | 결과 |
+|---|---|
+| PUT(도어 열림→ON, 닫힘→OFF, 23:51 예약 OFF, 23:55 예약 ON) | 200 version 2. **1초 안에** Pi 로그 `cfg 적용 v3 (rulesVersion=2)` → `rules installed v2 (4 rules)`, GET `appliedVersion: 2`, `data/agent/rules.json` version 2 |
+| 예약 OFF 23:51 (온라인) | `rule fired … {"schedule":"2026-10-26 23:51"}` 23:51:13, SSE 플러그 switch:false +120ms |
+| 예약 ON 23:55 (온라인) | 23:55:13 발동, +110ms 확정 |
+| 예약 OFF 23:59 (**백엔드 정지 상태**, 에이전트는 ECONNREFUSED 재접속 루프 중) | **23:59:13 발동, +140ms 플러그 OFF** — 백엔드 없이 로컬 스케줄 실행 확인. 백엔드 복귀 뒤 이벤트는 replay 로 전달(9b 와 동일 경로) |
+| 도어 트리거 오프라인 | 10-22 의 공유기 없는 시험(9c, 34/34)과 같은 엔진·같은 형식이라 재측정 생략. 이번엔 규칙이 플랫폼 API 에서 내려온 것만 다름 |
+| 시계 게이트 | Pi `clockSynced: true`(파일 존재). 미동기 상태의 보류는 단위 테스트로만(`rules.test.js`), 실기기 재부팅 시 확인은 미실시 |
+
+**운영 메모**
+- 플랫폼 쪽 사용법: 세대 기기 목록(`GET /v1/sites/{id}/devices`)의 `deviceId` 로 규칙을 만들어 `PUT …/automations` 한 번. `GET` 의 `gateways[].appliedVersion >= version` 이면 게이트웨이에 들어간 것. 규칙 전체 교체 방식이라 플랫폼이 원본을 보관해야 한다.
+- `tz` 기본 Asia/Seoul, `days` 생략은 매일. 같은 분에 두 번 발동하지 않는다. 게이트웨이가 꺼져 있던 동안 지나간 예약은 실행하지 않는다(밀린 실행 없음).
+- 검증 뒤 Pi 규칙은 도어 2개만 남기고 예약은 지움(매일 밤 플러그가 토글되지 않도록). Pi `.env` 는 다시 `SIOT_RELAY_URL=off`.
+- 남은 것: 세대 초기화 시 `automation_rules` 삭제, 공개 API 에서 `power`/`energy` 트리거는 endpoint 를 특정하지 않음(멀티 엔드포인트 플러그에서 교차 발동 가능), 피어(GW 2대) 규칙은 M3.

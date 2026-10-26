@@ -14,8 +14,20 @@
     "rules": [
       {
         "id": "r1",
-        "when": {},
-        "then": {}
+        "trigger": {
+          "deviceId": "matter:6",
+          "capability": "contact",
+          "field": "open",
+          "changedTo": true
+        },
+        "actions": [
+          {
+            "type": "command",
+            "deviceId": "matter:5",
+            "capability": "onoff",
+            "action": "on"
+          }
+        ]
       }
     ]
   },

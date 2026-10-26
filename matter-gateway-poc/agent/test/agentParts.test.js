@@ -58,9 +58,9 @@ test('SiteConfig: stores cfg (0600), acks versions, ignores older cfg, survives 
 test('health.json: exact shape, atomic write (no tmp left), periodic writer', async () => {
   const hdir = path.join(dir, 'state', 'health');
   const body = await writeHealth(hdir, { bootId: 'b1', version: '1.0.0', engineOnline: 1, deviceCount: '3', relay: { connected: true }, extra: 'no' });
-  assert.deepEqual(Object.keys(body), ['bootId', 'version', 'engineOnline', 'deviceCount', 'relay', 'writtenAt']);
+  assert.deepEqual(Object.keys(body), ['bootId', 'version', 'engineOnline', 'deviceCount', 'relay', 'clockSynced', 'writtenAt']);
   const onDisk = JSON.parse(await readFile(path.join(hdir, 'health.json'), 'utf8'));
-  assert.equal(onDisk.engineOnline, true); assert.equal(onDisk.deviceCount, 3); assert.deepEqual(onDisk.relay, { connected: true });
+  assert.equal(onDisk.engineOnline, true); assert.equal(onDisk.deviceCount, 3); assert.deepEqual(onDisk.relay, { connected: true }); assert.equal(onDisk.clockSynced, false);
   assert.ok(!Number.isNaN(Date.parse(onDisk.writtenAt)));
   let n = 0;
   const stop = startHealthWriter(hdir, () => ({ bootId: 'b2', version: '1.0.0', engineOnline: false, deviceCount: ++n, relay: { connected: false } }), 20);

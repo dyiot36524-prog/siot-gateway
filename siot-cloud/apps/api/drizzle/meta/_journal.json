@@ -8,6 +8,13 @@
       "when": 1792508082554,
       "tag": "0000_m1_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793025174757,
+      "tag": "0001_automations",
+      "breakpoints": true
     }
   ]
 }

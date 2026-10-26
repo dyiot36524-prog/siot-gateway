@@ -1,4 +1,5 @@
 {
+  "version": 0,
   "rules": [
     {
       "id": "door-open-turns-plug-on",
@@ -17,6 +18,15 @@
       "trigger": { "deviceId": "matter:2", "capability": "contact", "field": "open", "changedTo": false },
       "actions": [
         { "type": "delay", "ms": 5000 },
+        { "type": "command", "deviceId": "matter:1", "capability": "onoff", "action": "off" }
+      ]
+    },
+    {
+      "id": "plug-off-at-22",
+      "description": "평일 22:00(Asia/Seoul) 플러그 끄기. 시계 동기(SIOT_CLOCK_SYNC_FILE) 전에는 보류",
+      "enabled": false,
+      "trigger": { "type": "schedule", "at": "22:00", "days": ["mon", "tue", "wed", "thu", "fri"], "tz": "Asia/Seoul" },
+      "actions": [
         { "type": "command", "deviceId": "matter:1", "capability": "onoff", "action": "off" }
       ]
     }

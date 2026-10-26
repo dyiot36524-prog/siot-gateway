@@ -21,6 +21,8 @@ export type CfgVersion = number;
  */
 export type SiteId = string;
 export type GatewayId = string;
+export type RuleScalar = boolean | number;
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 /**
  * 에이전트 프로세스 시작마다 새로 만드는 uuid v4. seq 는 bootId 마다 1부터.
  */
@@ -104,9 +106,96 @@ export interface Peer {
    */
   mleid: string | null;
 }
+/**
+ * 세대 자동화 규칙 전체(게이트웨이 몫만). version 은 세대 규칙 버전(저장마다 +1, 0 = 플랫폼이 아직 보낸 적 없음). GW 는 version 이 지금보다 크지 않으면 무시하고, 적용 후 cfg_ack.rulesVersion 으로 보고한다.
+ */
 export interface Rules {
   version: number;
-  rules: {}[];
+  rules: Rule[];
+}
+/**
+ * 게이트웨이 로컬 자동화 규칙(에이전트가 실행하는 유일한 형식, /app/data/rules.json 과 같다). 클라우드가 공개 AutomationRule 을 컴파일해 cfg.rules 로 보낸다.
+ */
+export interface Rule {
+  id: string;
+  name?: string;
+  /**
+   * 없으면 true
+   */
+  enabled?: boolean;
+  trigger: RuleDeviceTrigger | RuleScheduleTrigger;
+  conditions?: RuleCondition[];
+  /**
+   * @minItems 1
+   */
+  actions: [RuleCommandAction | RuleDelayAction, ...(RuleCommandAction | RuleDelayAction)[]];
+}
+/**
+ * 기기 값 변화. type 이 없으면 device 로 본다(옛 rules.json 호환). changedTo(이전 값과 달라져 이 값이 될 때) 또는 equals 중 정확히 하나.
+ */
+export interface RuleDeviceTrigger {
+  type?: 'device';
+  /**
+   * 게이트웨이 로컬 노드 ID(로컬 기기 ID matter:<node>:<ep> 의 앞부분)
+   */
+  deviceId: string;
+  /**
+   * 없으면 노드의 모든 엔드포인트(battery·power·energy 처럼 다른 엔드포인트에서 합쳐진 값)
+   */
+  endpoint?: number;
+  capability: string;
+  field: string;
+  changedTo?: RuleScalar;
+  equals?: RuleScalar;
+}
+/**
+ * 매일(또는 days 요일) tz 기준 at 시각에 분당 1회. 게이트웨이 시계가 동기되지 않았으면 발동하지 않는다.
+ */
+export interface RuleScheduleTrigger {
+  type: 'schedule';
+  at: string;
+  /**
+   * 없으면 매일
+   *
+   * @minItems 1
+   */
+  days?: [Weekday, ...Weekday[]];
+  /**
+   * IANA 시간대. 없으면 Asia/Seoul
+   */
+  tz?: string;
+}
+/**
+ * 발동 시점의 기기 값 검사. equals·gt·lt 중 정확히 하나.
+ */
+export interface RuleCondition {
+  /**
+   * 게이트웨이 로컬 노드 ID(로컬 기기 ID matter:<node>:<ep> 의 앞부분)
+   */
+  deviceId: string;
+  /**
+   * 없으면 노드의 모든 엔드포인트(battery·power·energy 처럼 다른 엔드포인트에서 합쳐진 값)
+   */
+  endpoint?: number;
+  capability: string;
+  field: string;
+  equals?: RuleScalar;
+  gt?: number;
+  lt?: number;
+}
+export interface RuleCommandAction {
+  type: 'command';
+  /**
+   * 게이트웨이 로컬 노드 ID(로컬 기기 ID matter:<node>:<ep> 의 앞부분)
+   */
+  deviceId: string;
+  endpoint?: number;
+  capability: 'onoff';
+  action: 'on' | 'off' | 'toggle';
+}
+export interface RuleDelayAction {
+  type: 'delay';
+  ms: number;
 }
 /**
  * M2 부터. M1 cfg 에는 없다.

@@ -1,5 +1,5 @@
 // state/health/health.json — 호스트 OTA 확인 조건이 토큰·인터넷 없이 읽는 파일(계획 §2 d). 10초마다 원자적(rename) 쓰기.
-// 형태: {bootId, version, engineOnline, deviceCount, relay:{connected}, writtenAt}. relay 는 진단용(판정에 쓰지 않음).
+// 형태: {bootId, version, engineOnline, deviceCount, relay:{connected}, clockSynced, writtenAt}. relay·clockSynced 는 진단용(판정에 쓰지 않음).
 import { writeFile, mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { logger } from './log.js';
@@ -8,7 +8,7 @@ const log = logger('health');
 export const HEALTH_INTERVAL_MS = 10_000;
 
 export async function writeHealth(dir, h) {
-  const body = { bootId: h.bootId, version: h.version, engineOnline: Boolean(h.engineOnline), deviceCount: Number(h.deviceCount) || 0, relay: { connected: Boolean(h.relay?.connected) }, writtenAt: new Date().toISOString() };
+  const body = { bootId: h.bootId, version: h.version, engineOnline: Boolean(h.engineOnline), deviceCount: Number(h.deviceCount) || 0, relay: { connected: Boolean(h.relay?.connected) }, clockSynced: Boolean(h.clockSynced), writtenAt: new Date().toISOString() };
   await mkdir(dir, { recursive: true });
   const tmp = path.join(dir, `.health.json.${process.pid}.tmp`);
   await writeFile(tmp, JSON.stringify(body) + '\n', 'utf8');

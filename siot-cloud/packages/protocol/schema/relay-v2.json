@@ -137,8 +137,378 @@
         "rules": {
           "type": "array",
           "items": {
+            "$ref": "#/$defs/Rule"
+          }
+        }
+      },
+      "description": "세대 자동화 규칙 전체(게이트웨이 몫만). version 은 세대 규칙 버전(저장마다 +1, 0 = 플랫폼이 아직 보낸 적 없음). GW 는 version 이 지금보다 크지 않으면 무시하고, 적용 후 cfg_ack.rulesVersion 으로 보고한다."
+    },
+    "RuleScalar": {
+      "title": "RuleScalar",
+      "type": [
+        "boolean",
+        "number"
+      ]
+    },
+    "Weekday": {
+      "title": "Weekday",
+      "type": "string",
+      "enum": [
+        "mon",
+        "tue",
+        "wed",
+        "thu",
+        "fri",
+        "sat",
+        "sun"
+      ]
+    },
+    "RuleDeviceTrigger": {
+      "title": "RuleDeviceTrigger",
+      "description": "기기 값 변화. type 이 없으면 device 로 본다(옛 rules.json 호환). changedTo(이전 값과 달라져 이 값이 될 때) 또는 equals 중 정확히 하나.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceId",
+        "capability",
+        "field"
+      ],
+      "properties": {
+        "type": {
+          "const": "device"
+        },
+        "deviceId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "게이트웨이 로컬 노드 ID(로컬 기기 ID matter:<node>:<ep> 의 앞부분)",
+          "examples": [
+            "matter:5"
+          ]
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "없으면 노드의 모든 엔드포인트(battery·power·energy 처럼 다른 엔드포인트에서 합쳐진 값)"
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "onoff",
+            "contact"
+          ]
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "on",
+            "open"
+          ]
+        },
+        "changedTo": {
+          "$ref": "#/$defs/RuleScalar"
+        },
+        "equals": {
+          "$ref": "#/$defs/RuleScalar"
+        }
+      },
+      "if": {
+        "type": "object",
+        "required": [
+          "changedTo"
+        ],
+        "properties": {
+          "changedTo": true
+        }
+      },
+      "then": {
+        "not": {
+          "type": "object",
+          "required": [
+            "equals"
+          ],
+          "properties": {
+            "equals": true
+          }
+        }
+      },
+      "else": {
+        "type": "object",
+        "required": [
+          "equals"
+        ],
+        "properties": {
+          "equals": true
+        }
+      }
+    },
+    "RuleScheduleTrigger": {
+      "title": "RuleScheduleTrigger",
+      "description": "매일(또는 days 요일) tz 기준 at 시각에 분당 1회. 게이트웨이 시계가 동기되지 않았으면 발동하지 않는다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "at"
+      ],
+      "properties": {
+        "type": {
+          "const": "schedule"
+        },
+        "at": {
+          "type": "string",
+          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+          "examples": [
+            "22:00"
+          ]
+        },
+        "days": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/Weekday"
+          },
+          "description": "없으면 매일"
+        },
+        "tz": {
+          "type": "string",
+          "minLength": 1,
+          "description": "IANA 시간대. 없으면 Asia/Seoul",
+          "examples": [
+            "Asia/Seoul"
+          ]
+        }
+      }
+    },
+    "RuleCondition": {
+      "title": "RuleCondition",
+      "description": "발동 시점의 기기 값 검사. equals·gt·lt 중 정확히 하나.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deviceId",
+        "capability",
+        "field"
+      ],
+      "properties": {
+        "deviceId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "게이트웨이 로컬 노드 ID(로컬 기기 ID matter:<node>:<ep> 의 앞부분)",
+          "examples": [
+            "matter:5"
+          ]
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "없으면 노드의 모든 엔드포인트(battery·power·energy 처럼 다른 엔드포인트에서 합쳐진 값)"
+        },
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "onoff",
+            "contact"
+          ]
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "on",
+            "open"
+          ]
+        },
+        "equals": {
+          "$ref": "#/$defs/RuleScalar"
+        },
+        "gt": {
+          "type": "number"
+        },
+        "lt": {
+          "type": "number"
+        }
+      },
+      "if": {
+        "type": "object",
+        "required": [
+          "equals"
+        ],
+        "properties": {
+          "equals": true
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "gt"
+              ],
+              "properties": {
+                "gt": true
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "lt"
+              ],
+              "properties": {
+                "lt": true
+              }
+            }
+          ]
+        }
+      },
+      "else": {
+        "if": {
+          "type": "object",
+          "required": [
+            "gt"
+          ],
+          "properties": {
+            "gt": true
+          }
+        },
+        "then": {
+          "not": {
             "type": "object",
-            "description": "자동화 규칙(형식은 Step 5 에서 확정, 그 전까지 불투명 객체)"
+            "required": [
+              "lt"
+            ],
+            "properties": {
+              "lt": true
+            }
+          }
+        },
+        "else": {
+          "type": "object",
+          "required": [
+            "lt"
+          ],
+          "properties": {
+            "lt": true
+          }
+        }
+      }
+    },
+    "RuleCommandAction": {
+      "title": "RuleCommandAction",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "deviceId",
+        "capability",
+        "action"
+      ],
+      "properties": {
+        "type": {
+          "const": "command"
+        },
+        "deviceId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "게이트웨이 로컬 노드 ID(로컬 기기 ID matter:<node>:<ep> 의 앞부분)",
+          "examples": [
+            "matter:5"
+          ]
+        },
+        "endpoint": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "capability": {
+          "const": "onoff"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "on",
+            "off",
+            "toggle"
+          ]
+        }
+      }
+    },
+    "RuleDelayAction": {
+      "title": "RuleDelayAction",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "ms"
+      ],
+      "properties": {
+        "type": {
+          "const": "delay"
+        },
+        "ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000
+        }
+      }
+    },
+    "Rule": {
+      "title": "Rule",
+      "description": "게이트웨이 로컬 자동화 규칙(에이전트가 실행하는 유일한 형식, /app/data/rules.json 과 같다). 클라우드가 공개 AutomationRule 을 컴파일해 cfg.rules 로 보낸다.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "trigger",
+        "actions"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "aut_01JZ8Q0V4Y4W6P1M2N3B5C7D9E"
+          ]
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "없으면 true"
+        },
+        "trigger": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RuleDeviceTrigger"
+            },
+            {
+              "$ref": "#/$defs/RuleScheduleTrigger"
+            }
+          ]
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RuleCondition"
+          }
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/RuleCommandAction"
+              },
+              {
+                "$ref": "#/$defs/RuleDelayAction"
+              }
+            ]
           }
         }
       }

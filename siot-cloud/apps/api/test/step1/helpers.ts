@@ -103,8 +103,10 @@ export class FakeBus implements GatewayBus {
   isOnline(gatewayId: string): boolean {
     return this.online.has(gatewayId);
   }
-  async sendCfg(_g: string, _c: Omit<CfgFrame, 't'>): Promise<boolean> {
-    return false;
+  readonly cfgs: { gatewayId: string; cfg: Omit<CfgFrame, 't'> }[] = [];
+  async sendCfg(gatewayId: string, cfg: Omit<CfgFrame, 't'>): Promise<boolean> {
+    this.cfgs.push({ gatewayId, cfg });
+    return this.online.has(gatewayId);
   }
   async sendBind(_g: string, _b: Omit<BindFrame, 't'>): Promise<boolean> {
     return false;

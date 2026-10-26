@@ -62,6 +62,8 @@ describe('OpenAPI ↔ protocol schema', () => {
         'GET /v1/sites/{siteId}',
         'GET /v1/sites/{siteId}/gateways',
         'GET /v1/sites/{siteId}/devices',
+        'GET /v1/sites/{siteId}/automations',
+        'PUT /v1/sites/{siteId}/automations',
         'GET /v1/gateways/{gatewayId}',
         'GET /v1/devices/{deviceId}',
         'POST /v1/devices/{deviceId}/control',
@@ -89,7 +91,7 @@ describe('drizzle M1 schema', () => {
     .filter((v): v is PgTable => is(v, PgTable))
     .map((t) => getTableConfig(t));
 
-  it('defines exactly the 13 M1 tables', () => {
+  it('defines exactly the M1 tables (13 + automation_rules)', () => {
     expect(tables.map((t) => t.name).sort()).toEqual([...dbSchema.M1_TABLES].sort());
   });
 
@@ -106,7 +108,7 @@ describe('drizzle M1 schema', () => {
   it('migration SQL is generated and committed', () => {
     const journal = JSON.parse(readFileSync(new URL('../drizzle/meta/_journal.json', import.meta.url), 'utf8'));
     expect(journal.entries.length).toBeGreaterThanOrEqual(1);
-    const sql = readFileSync(new URL(`../drizzle/${journal.entries[0].tag}.sql`, import.meta.url), 'utf8');
+    const sql = journal.entries.map((e: { tag: string }) => readFileSync(new URL(`../drizzle/${e.tag}.sql`, import.meta.url), 'utf8')).join('\n');
     for (const t of dbSchema.M1_TABLES) expect(sql).toContain(`CREATE TABLE "${t}"`);
   });
 });

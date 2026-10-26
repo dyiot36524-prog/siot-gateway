@@ -80,6 +80,7 @@ services:
       PAIRING_MAX_ATTEMPTS: ${PAIRING_MAX_ATTEMPTS:-3}   # BLE 링크 실패 시 커미셔닝 재시도 횟수
       OTBR_REST_URL: http://127.0.0.1:8081
       RULES_FILE: /app/data/rules.json   # 없으면 이미지의 /app/rules.example.json 을 최초 1회 복사(install.sh 는 기존 ./rules.json 을 이관)
+      SIOT_CLOCK_SYNC_FILE: /host/systemd/timesync/synchronized   # Pi 는 RTC 가 없어 NTP 동기 전 시계가 틀림 → 이 파일(timesyncd 가 동기 후 생성)이 생길 때까지 schedule 규칙 보류
       DATA_DIR: /app/data
       LOG_LEVEL: ${LOG_LEVEL:-info}
       TZ: Asia/Seoul
@@ -91,6 +92,7 @@ services:
       - ./state/out:/app/state/out:ro                 # 읽기 전용: 호스트 스크립트 결과
       - /sys/firmware/devicetree/base/serial-number:/host/serial-number:ro   # gatewayId 결정적 생성용
       - /etc/machine-id:/host/machine-id:ro
+      - /run/systemd:/host/systemd:ro                 # 읽기 전용: timesync/synchronized(NTP 동기 표시). timesync 디렉터리는 timesyncd 재시작 때 지워졌다 다시 생기므로(RuntimeDirectoryPreserve=no) 상위를 마운트
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
       interval: 30s
@@ -127,6 +129,7 @@ services:
       MATTER_VENDOR_ID: "65521"      # 0xFFF1 테스트 VID
       OTBR_REST_URL: http://127.0.0.1:8081
       RULES_FILE: /app/data/rules.json
+      SIOT_CLOCK_SYNC_FILE: /host/systemd/timesync/synchronized   # RTC 없음 → NTP 동기 전에는 schedule 규칙 보류
       DATA_DIR: /app/data
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
@@ -136,4 +139,5 @@ services:
       - ./state/out:/app/state/out:ro
       - /sys/firmware/devicetree/base/serial-number:/host/serial-number:ro
       - /etc/machine-id:/host/machine-id:ro
+      - /run/systemd:/host/systemd:ro
       - /var/run/dbus:/var/run/dbus:ro

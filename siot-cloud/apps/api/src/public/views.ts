@@ -5,8 +5,8 @@ import type { sites } from '../db/schema.js';
 type SiteRow = typeof sites.$inferSelect;
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
-/** public-v1 Gateway (siteId 필수 — 세대 미소속 GW 는 호출하지 않는다) */
-export function toPublicGateway(g: GatewayView) {
+/** public-v1 Gateway (siteId 필수 — 세대 미소속 GW 는 호출하지 않는다). rulesVersion 은 조회 API 만 넘긴다(gateways.rules_acked_version) */
+export function toPublicGateway(g: GatewayView, rulesVersion?: number) {
   return {
     gatewayId: g.gatewayId,
     siteId: g.siteId!,
@@ -15,6 +15,7 @@ export function toPublicGateway(g: GatewayView) {
     agentVersion: g.agentVersion,
     matterServerVersion: g.matterServerVersion,
     deviceCount: g.deviceCount,
+    ...(rulesVersion !== undefined ? { rulesVersion } : {}),
   };
 }
 
