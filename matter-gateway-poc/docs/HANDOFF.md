@@ -196,3 +196,11 @@ main 의 M1 커밋(e304215·597abf0·d789eff·469fd58)을 Pi 에 반영하고 �
 **검증(09:06~09:07 케이블 실제 분리, 자석 10초 간격).** 분리 중 도어 이벤트 34건 전부 도착·규칙 34회 발동·플러그 동작, `br state running` 유지, 복구 후 센서 재부팅 없음. 플러그 양방향도 정상.
 
 **운영 메모.** Pi 의 `.env` 는 `BACKBONE_IF=siot0`. 되돌리기: `BACKBONE_IF=eth0` → `docker compose up -d`, `sudo systemctl disable --now siot-infra`. Pi 임시 파일: `~/eth0-down-probe.sh|.log`, `~/unplug-monitor.sh|.log`, `~/sse-logger.sh`, `~/rule-sse.log`, `~/wpan0.pcap`(센서 패킷 캡처), `~/m1-dummy-if.sh|.log`. 센서 펌웨어 1.0.9 → DCL 에 1.1.4 OTA 가 있다고 matterjs-server 가 알림(미적용).
+
+### 9d. C3 ①② 제어 SLO 실측 + GHCR 에이전트 이미지 (2026-10-26 23:10 KST)
+- **C3 ①② 통과.** Mac 로컬 백엔드(8090, Pi 릴레이 `ws://192.168.0.89:8090/gateway`)에 Pi 를 붙이고 `tools/slo/control-100.ts` 를 공개 API 키로 실행(`SIOT_API=http://127.0.0.1:8090 DEVICE_ID=dev_01M5D12DB4J77PA3P1R2QNYDM2`, 요청 간격 400ms).
+  - ① ON/OFF 교대 100회: **confirmed ≤3초 100/100**(기준 99). 확정 지연 p50 128ms · p95 191ms · p99 334ms · 최대 334ms. 미확정·오프라인 0.
+  - ② 같은 ON 연속 10회: **10/10**. p50 74ms · p95 137ms(이미 ON 인 상태라 더 빠름).
+  - 10-21 의 "20회 중 1회 5.9초" 지연은 이번 110회에선 없었다. 경계 케이스였던 1/100 우려는 해소. Fly 배포 후 인터넷 경유로 한 번 더 재는 것은 남음(계획 §7 M1-9).
+  - 측정 후 Pi `.env` 는 다시 `SIOT_RELAY_URL=off`.
+- **GHCR 에이전트 이미지.** 태그 `agent-v0.2.0` 푸시 → `.github/workflows/gateway-agent-image.yml`(npm test → OTA manifest → arm64 buildx → GHCR) 실행, 약 2분 만에 성공(run 40337431873). 이미지 `ghcr.io/dyiot36524-prog/siot-gateway-agent:0.2.0`, **digest `sha256:bbb4dad4995b43d187ebe8c7a8182b7a0c9105e428672c852f151f4186057040`**(공개, 익명 pull 가능 — 레지스트리 HEAD 로 확인). `.env AGENT_IMAGE=ghcr.io/dyiot36524-prog/siot-gateway-agent@sha256:bbb4dad4995b43d187ebe8c7a8182b7a0c9105e428672c852f151f4186057040` 로 바꾸고 `docker compose up -d --pull missing` 하면 Pi 가 로컬 빌드 대신 출고 이미지를 쓴다(아직 바꾸지 않음 — 로컬 빌드 유지).
