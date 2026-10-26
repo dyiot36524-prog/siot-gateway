@@ -223,10 +223,11 @@ main 의 M1 커밋(e304215·597abf0·d789eff·469fd58)을 Pi 에 반영하고 �
 | 예약 ON 23:55 (온라인) | 23:55:13 발동, +110ms 확정 |
 | 예약 OFF 23:59 (**백엔드 정지 상태**, 에이전트는 ECONNREFUSED 재접속 루프 중) | **23:59:13 발동, +140ms 플러그 OFF** — 백엔드 없이 로컬 스케줄 실행 확인. 백엔드 복귀 뒤 이벤트는 replay 로 전달(9b 와 동일 경로) |
 | 도어 트리거 오프라인 | 10-22 의 공유기 없는 시험(9c, 34/34)과 같은 엔진·같은 형식이라 재측정 생략. 이번엔 규칙이 플랫폼 API 에서 내려온 것만 다름 |
-| 시계 게이트 | Pi `clockSynced: true`(파일 존재). 미동기 상태의 보류는 단위 테스트로만(`rules.test.js`), 실기기 재부팅 시 확인은 미실시 |
+| 시계 게이트 (재부팅 실측, 10-27 00:34 전원 재투입) | **통과**. 부팅 직후 Pi 시계는 저장값(약 3분 20초 과거)으로 올라오고 `/run/systemd/timesync/synchronized` 없음 → 새 에이전트 `health.json` **`clockSynced: false`**(Pi 시계 00:35:07·00:35:17 샘플) → timesyncd 첫 동기 00:38:42(Pi 시계 기준, 실시간으로는 에이전트 기동 약 25초 뒤) → `clockSynced: true`. 규칙은 `2 rules loaded (v4)` 로 영속 확인. 전원 차단 직후 첫 샘플은 이전 부팅의 health.json 이 남아 `true` 로 보일 수 있음(에이전트가 10초 안에 덮어씀) |
 
 **운영 메모**
 - 플랫폼 쪽 사용법: 세대 기기 목록(`GET /v1/sites/{id}/devices`)의 `deviceId` 로 규칙을 만들어 `PUT …/automations` 한 번. `GET` 의 `gateways[].appliedVersion >= version` 이면 게이트웨이에 들어간 것. 규칙 전체 교체 방식이라 플랫폼이 원본을 보관해야 한다.
 - `tz` 기본 Asia/Seoul, `days` 생략은 매일. 같은 분에 두 번 발동하지 않는다. 게이트웨이가 꺼져 있던 동안 지나간 예약은 실행하지 않는다(밀린 실행 없음).
 - 검증 뒤 Pi 규칙은 도어 2개만 남기고 예약은 지움(매일 밤 플러그가 토글되지 않도록). Pi `.env` 는 다시 `SIOT_RELAY_URL=off`.
+- CI e2e `apps/api/test/relay/e2e.automations.test.ts`: 실제 에이전트(시뮬 백엔드) 자식 프로세스로 PUT → rules.json v1 → 시뮬 도어 열림 → 에이전트가 플러그 ON → evt → 공개 API 반영, PUT [] → v2 까지 1.5초. 커밋 e47291f.
 - 남은 것: 세대 초기화 시 `automation_rules` 삭제, 공개 API 에서 `power`/`energy` 트리거는 endpoint 를 특정하지 않음(멀티 엔드포인트 플러그에서 교차 발동 가능), 피어(GW 2대) 규칙은 M3.
